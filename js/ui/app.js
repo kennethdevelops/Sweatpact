@@ -11,6 +11,7 @@ import * as home from './screens/home.js';
 import * as historyScreen from './screens/history.js';
 import * as pact from './screens/pact.js';
 import * as settings from './screens/settings.js';
+import * as body from './screens/body.js';
 import * as sheets from './sheets.js';
 import { celebrateView, incomingPoke, splash, tabbar, toastView } from './components.js';
 import { closeCamera, isCameraOpen, openCamera } from './camera.js';
@@ -202,7 +203,7 @@ export function createApp({ root, store }) {
   };
 
   const actions = { ...common };
-  for (const group of [welcome.actions, home.actions, historyScreen.actions, pact.actions, settings.actions, sheets.actions]) {
+  for (const group of [welcome.actions, home.actions, historyScreen.actions, body.actions, pact.actions, settings.actions, sheets.actions]) {
     for (const [k, fn] of Object.entries(group)) {
       if (k in actions) console.warn(`Duplicate action "${k}"`);
       else actions[k] = fn;
@@ -242,6 +243,11 @@ export function createApp({ root, store }) {
   root.addEventListener('change', (ev) => {
     const el = ev.target.closest('[data-change]');
     if (el) run(el.dataset.change, { ...el.dataset }, ev, el);
+  });
+
+  root.addEventListener('input', (ev) => {
+    const el = ev.target.closest('[data-input]');
+    if (el) run(el.dataset.input, { ...el.dataset }, ev, el);
   });
 
   window.addEventListener('hashchange', () => store.ui({ route: routeFromHash() }));

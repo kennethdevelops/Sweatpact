@@ -22,6 +22,7 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 | Poke 👉 | Nudge your partner (“Gym today? 💪”). It shows as a banner on their Home screen. One poke per hour. |
 | Gallery upload | Pick a photo from your library instead of the camera. It's tagged “🖼️ gallery” so it stays honest. |
 | Stats & calendar | History → Stats: a monthly calendar colored by who worked out, plus workouts, per-week average, goal hit rate, best run, favorite activity and stakes won/lost, side by side. |
+| Weight & body ⚖️ | Optional: History → Body. Log your weight whenever you like (daily, every few weeks, never). Tap **Body composition** to add skeletal muscle, fat mass and body water from a smart scale or gym machine. You get a smoothed trend chart, weekly rate, goal progress, BMI (with your height), body fat %, lean mass and a BMR estimate. kg or lb. **Private**: only you see your weigh-ins; optionally share just your progress (“−2 kg since Aug 10”) with your partner. |
 | Weekly recap | The first time you open the app in a new week, a recap of last week pops up (also on every week in History). **Share to WhatsApp** turns it into an image. Single check-ins can be shared from the photo viewer too. |
 | Team streak 🔥 | Consecutive weeks where you *both* hit your goals. |
 | Treat yourselves 🎁 | Set a shared reward (“Fancy brunch”) for hitting your goals N weeks in a row, then cash it in. |
@@ -33,7 +34,7 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 
 What's *not* possible in a web app: Home Screen **widgets**, and **push notifications** without running a server (see [Ideas for later](#ideas-for-later)).
 
-> **Updating from 1.0?** Version 1.1 added pokes and comments, which need the new rules: paste [`firestore.rules`](firestore.rules) into Firebase → Firestore Database → Rules → **Publish** again.
+> **Updating from an older version?** Version 1.1 added pokes and comments and 1.2 added weight tracking. Both need the new rules: paste [`firestore.rules`](firestore.rules) into Firebase → Firestore Database → Rules → **Publish** again.
 
 ---
 
@@ -166,6 +167,7 @@ js/
   core/
     logic.js                The rules of the game: weeks, goals, stakes, streaks, rewards
     stats.js                Stats, calendar and weekly recap numbers
+    body.js                 Weight & body composition: units, BMI/BMR, trend, validation
     share-card.js           Draws the shareable recap / check-in images, opens WhatsApp
     dates.js                Day/week helpers
     photos.js               Camera capture, cropping, JPEG compression
@@ -180,7 +182,7 @@ js/
     camera.js               The check-in camera
     sheets.js               Bottom sheets & photo viewer
     components.js           Shared UI pieces
-    screens/                welcome (onboarding), home, history, pact, settings
+    screens/                welcome (onboarding), home, history, body, pact, settings
   lib/                      Tiny helpers: HTML templating + DOM diffing, icons, IndexedDB
 tests/                      `npm test` – logic tests + Firebase backend tests against a fake Firebase
 ```
@@ -188,13 +190,15 @@ tests/                      `npm test` – logic tests + Firebase backend tests 
 ### Data model (Firestore)
 
 ```
-users/{uid}                    { name, pairId }
+users/{uid}                    { name, pairId, body: { heightCm, sex, birthYear, goalKg, units, share } }
+users/{uid}/weights/{dayKey}   { weightKg, muscleKg?, fatKg?, waterKg?, note? }   ← private, only you can read it
 codes/{CODE}                   { pairId, creatorName, ... }        ← how a partner finds the pact
 pairs/{pairId}                 { members, names, goals, stakes, weekStartsOn, startWeek, reward, rewardHistory, paid }
 pairs/{pairId}/checkins/{id}   { uid, dayKey, kind, status, activity, note, reactions, ... }   (small)
 pairs/{pairId}/photos/{id}     { main, inset }                     (compressed JPEGs, fetched only when shown)
 pairs/{pairId}/comments/{id}   { checkinId, uid, text, clientAt }
-(pokes live on the pair document: pokes.{uid} = { text, at }, pokeSeen.{uid} = at)
+(pokes live on the pair document: pokes.{uid} = { text, at }, pokeSeen.{uid} = at;
+ with sharing on, bodyShare.{uid} = { deltaKg, ratePerWeekKg, count, since } – no absolute weights)
 ```
 
 Goals and stakes are stored as small histories (`[{from: '2026-09-28', value: 3}, ...]`) so past weeks are always judged by the rules that applied at the time. Streaks, debts and reward progress are computed on the phone from the check-ins — see `js/core/logic.js`.
@@ -212,6 +216,7 @@ On the free Spark plan, Firestore includes 1 GiB of storage, 50K reads/day, 20K 
 - Only the two members of a pact can read or change its check-ins, photos and settings (enforced by `firestore.rules`).
 - A partner joins by knowing the pact code; a pact never has more than two people.
 - You can only approve your *partner's* pinky promises, only edit or delete your own check-ins and comments, and only set your own reaction and poke.
+- Weigh-ins and body composition are readable only by you — not even your partner. With **Share my progress** on, your partner sees only your change and weekly rate.
 - Your photos live in **your own** Firebase project — not on anyone else's server.
 
 ---

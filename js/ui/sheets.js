@@ -1,12 +1,15 @@
 // Bottom sheets and the full-screen photo viewer.
 import { html, raw, cx } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
-import { fullDay, relativeDay, dowShort, timeOfDay, fromDayKey, weekStartKey, timeAgo, now, weekRange, prevWeek } from '../core/dates.js';
+import { fullDay, relativeDay, dowShort, timeOfDay, fromDayKey, weekStartKey, timeAgo, now, weekRange, prevWeek, todayKey } from '../core/dates.js';
 import { weekRecap } from '../core/stats.js';
 import { renderCheckinImage, renderRecapImage, shareToWhatsApp } from '../core/share-card.js';
 import { promiseDays } from '../core/logic.js';
 import { photoCache } from '../core/photo-cache.js';
-import { ACTIVITIES, APP_NAME, MAX_COMMENT, MAX_NAME, MAX_NOTE, MAX_POKE, MAX_REWARD, MAX_STAKES, POKE_COOLDOWN_MIN, POKE_PRESETS, REWARD_SUGGESTIONS, STAKES_SUGGESTIONS } from '../config.js';
+import {
+  cmToFtIn, derive, formatWeight, fromDisplay, parseNumber, sortEntries, toDisplay, validateEntry, validateProfile, weightUnit,
+} from '../core/body.js';
+import { ACTIVITIES, APP_NAME, MAX_COMMENT, MAX_NAME, MAX_NOTE, MAX_POKE, MAX_REWARD, MAX_STAKES, MAX_WEIGHT_NOTE, POKE_COOLDOWN_MIN, POKE_PRESETS, REWARD_SUGGESTIONS, STAKES_SUGGESTIONS } from '../config.js';
 import { activityText, avatar, commentsByCheckin, nameOf, photoView, promiseBlock, reactionsBar, thumbImg, who } from './components.js';
 
 function frame(key, content, { label = '' } = {}) {
@@ -132,6 +135,7 @@ const CONFIRM = {
   resetDemo: () => ({ title: 'Reset the demo?', text: 'Start over with fresh sample data.', cta: 'Reset', danger: true }),
   exitDemo: () => ({ title: 'Exit the demo?', text: 'Demo data will be deleted from this device.', cta: 'Exit demo' }),
   deleteCheckin: () => ({ title: 'Delete this check-in?', text: 'It will be removed for both of you.', cta: 'Delete', danger: true }),
+  deleteWeight: () => ({ title: 'Delete this weigh-in?', text: '', cta: 'Delete', danger: true }),
 };
 
 function confirmSheet(state, m, sheet) {
@@ -264,6 +268,107 @@ function pokeSheet(state, m) {
   </form>`, { label: 'Poke' });
 }
 
+// ----- weight & body composition -----
+
+const numStr = (v) => (v == null ? '' : String(v));
+
+function weightSheet(state, m, sheet) {
+  const body = state.body || {};
+  const units = body.units || 'metric';
+  const u = weightUnit(units);
+  const entries = sortEntries(state.weights);
+  const entry = sheet.id ? entries.find((e) => e.id === sheet.id) : null;
+  const last = entries[entries.length - 1];
+  const today = todayKey();
+  const disp = (kg) => (kg == null ? '' : String(toDisplay(kg, units)));
+  const init = entry
+    ? { dayKey: entry.dayKey, weight: disp(entry.weightKg), muscle: disp(entry.muscleKg), fat: disp(entry.fatKg), water: disp(entry.waterKg), note: entry.note || '' }
+    : { dayKey: today, weight: disp(last?.weightKg), muscle: '', fat: '', water: '', note: '' };
+  const v = { ...init, ...(sheet.draft || {}) };
+
+  // Live hints from what's typed so far
+  const kg = (x) => {
+    const n = parseNumber(x);
+    return n == null || Number.isNaN(n) ? null : fromDisplay(n, units);
+  };
+  const d = derive({ weightKg: kg(v.weight), muscleKg: kg(v.muscle), fatKg: kg(v.fat), waterKg: kg(v.water) }, body, v.dayKey || today);
+  const clash = v.dayKey && v.dayKey !== entry?.id && entries.some((e) => e.id === v.dayKey);
+  const compField = (name, label, hint) => html`<label class="field comp-field"><span>${label}</span>
+      <span class="unit-input"><input class="input" name=${name} inputmode="decimal" autocomplete="off" value=${numStr(v[name])} placeholder="–"><i>${u}</i></span>
+      <small class="field-hint">${hint || raw('&nbsp;')}</small></label>`;
+
+  return frame('weight', html`<form data-submit="saveWeight" data-input="weightDraft" novalidate autocomplete="off">
+    <h2>${entry ? 'Edit weigh-in' : 'Log weight ⚖️'}</h2>
+    <label class="field"><span>Date</span><input class="input" type="date" name="dayKey" max=${today} value=${v.dayKey}></label>
+    ${clash ? html`<p class="note small">You already logged ${relativeDay(v.dayKey, today).toLowerCase()}. Saving replaces that entry.</p>` : ''}
+    <div class="field"><span>Weight</span>
+      <div class="stepper">
+        <button type="button" class="step-btn" data-action="stepWeight" data-delta="-0.1" aria-label="Minus 0.1">${icon('minus', { size: 20 })}</button>
+        <span class="unit-input big"><input class="input input-lg" name="weight" inputmode="decimal" value=${numStr(v.weight)} placeholder="0.0" aria-label=${`Weight in ${u}`} ${entry ? '' : raw('autofocus')}><i>${u}</i></span>
+        <button type="button" class="step-btn" data-action="stepWeight" data-delta="0.1" aria-label="Plus 0.1">${icon('plus', { size: 20 })}</button>
+      </div>
+      ${d.bmi != null ? html`<small class="field-hint">BMI ${d.bmi.toFixed(1)} · ${d.bmiCategory}</small>` : ''}
+    </div>
+    <button type="button" class="disclosure" data-action="toggleComp" aria-expanded=${sheet.showComp ? 'true' : 'false'}>
+      <span>Body composition <small>optional</small></span>${icon(sheet.showComp ? 'minus' : 'plus', { size: 18 })}
+    </button>
+    ${sheet.showComp
+      ? html`<div class="comp-fields">
+          <p class="muted small">From a smart scale, watch or gym body-composition machine. Fill in whatever you have.</p>
+          ${compField('muscle', 'Skeletal muscle', d.musclePct != null ? `${d.musclePct}% of weight` : '')}
+          ${compField('fat', 'Fat mass', d.fatPct != null ? `${d.fatPct}% body fat${d.fatCategory ? ` · ${d.fatCategory}` : ''}` : '')}
+          ${compField('water', 'Body water', d.waterPct != null ? `${d.waterPct}% of weight` : '')}
+          ${d.bmr != null && d.bmrMethod === 'katch' ? html`<p class="muted small">BMR ≈ ${d.bmr.toLocaleString('en-US')} kcal/day</p>` : ''}
+        </div>`
+      : ''}
+    <label class="field"><span>Note (optional)</span><input class="input" name="note" maxlength=${MAX_WEIGHT_NOTE} value=${v.note} placeholder="e.g. after holidays"></label>
+    ${sheet.error ? html`<p class="form-error" role="alert">${sheet.error}</p>` : ''}
+    <div class="sheet-actions">
+      ${entry ? html`<button type="button" class="btn btn-ghost" data-action="confirm" data-kind="deleteWeight" data-id=${entry.id}>${icon('trash', { size: 18 })} Delete</button>` : html`<span></span>`}
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+    <p class="footnote">${icon('lock', { size: 13 })} Only you can see this.</p>
+  </form>`, { label: 'Log weight' });
+}
+
+function bodyProfileSheet(state, m, sheet) {
+  const body = state.body || {};
+  const units = sheet.units || body.units || 'metric';
+  const imperial = units === 'imperial';
+  const fi = body.heightCm ? cmToFtIn(body.heightCm) : null;
+  const radio = (name, value, label, checked, change = '') =>
+    html`<label><input type="radio" name=${name} value=${value} ${change ? raw(`data-change="${change}"`) : ''} ${checked ? raw('checked') : ''}><span>${label}</span></label>`;
+  return frame('bodyProfile', html`<form data-submit="saveBody" novalidate autocomplete="off">
+    <h2>Body settings</h2>
+    <p class="muted">All optional. Height gives you BMI. Sex and birth year give a BMR estimate and body fat ranges.</p>
+    <div class="field"><span>Units</span>
+      <div class="seg" role="radiogroup" aria-label="Units">
+        ${radio('units', 'metric', 'kg · cm', !imperial, 'bodyUnits')}${radio('units', 'imperial', 'lb · ft/in', imperial, 'bodyUnits')}
+      </div>
+    </div>
+    ${imperial
+      ? html`<div class="field" data-key="h-imp"><span>Height</span><div class="pair-inputs">
+          <span class="unit-input"><input class="input" name="heightFt" inputmode="numeric" value=${fi ? fi.ft : ''} placeholder="5"><i>ft</i></span>
+          <span class="unit-input"><input class="input" name="heightIn" inputmode="numeric" value=${fi ? fi.in : ''} placeholder="9"><i>in</i></span>
+        </div></div>`
+      : html`<label class="field" data-key="h-met"><span>Height</span><span class="unit-input"><input class="input" name="heightCm" inputmode="decimal" value=${body.heightCm ? Math.round(body.heightCm) : ''} placeholder="175"><i>cm</i></span></label>`}
+    <label class="field" data-key=${`goal-${units}`}><span>Goal weight</span><span class="unit-input"><input class="input" name="goal" inputmode="decimal" value=${body.goalKg ? toDisplay(body.goalKg, units) : ''} placeholder="–"><i>${weightUnit(units)}</i></span></label>
+    <div class="field"><span>Sex</span>
+      <div class="seg" role="radiogroup" aria-label="Sex">
+        ${radio('sex', '', 'Not set', !body.sex)}${radio('sex', 'f', 'Female', body.sex === 'f')}${radio('sex', 'm', 'Male', body.sex === 'm')}
+      </div>
+    </div>
+    <label class="field"><span>Birth year</span><input class="input" name="birthYear" inputmode="numeric" value=${body.birthYear || ''} placeholder="e.g. 1994"></label>
+    <label class="toggle-row">
+      <input type="checkbox" name="share" ${body.share ? raw('checked') : ''}>
+      <span><b>Share my progress${m.hasPartner ? ` with ${m.names.partner}` : ''}</b>
+      <small>${m.hasPartner ? m.names.partner : 'Your partner'} sees only your change since your first weigh-in and your weekly rate – never your weight or body composition.</small></span>
+    </label>
+    ${sheet.error ? html`<p class="form-error" role="alert">${sheet.error}</p>` : ''}
+    <button class="btn btn-primary btn-block btn-lg" type="submit">Save</button>
+  </form>`, { label: 'Body settings' });
+}
+
 export function render(state, m) {
   const sheet = state.ui.sheet;
   if (!sheet) return '';
@@ -276,6 +381,8 @@ export function render(state, m) {
     case 'goal': return m ? goalSheet(state, m) : '';
     case 'reward': return m ? rewardSheet(state, m) : '';
     case 'name': return m ? nameSheet(state, m) : '';
+    case 'weight': return m ? weightSheet(state, m, sheet) : '';
+    case 'bodyProfile': return m ? bodyProfileSheet(state, m, sheet) : '';
     case 'account': return accountSheet(state, sheet);
     case 'confirm': return confirmSheet(state, m, sheet);
     default: return '';
@@ -400,6 +507,47 @@ export const actions = {
       setSheet({ busy: false, error: err.message });
     }
   },
+  weightDraft(ctx, data, ev, form) {
+    const f = form.elements;
+    const draft = { dayKey: f.dayKey?.value, weight: f.weight?.value, note: f.note?.value };
+    for (const k of ['muscle', 'fat', 'water']) if (f[k]) draft[k] = f[k].value;
+    ctx.store.ui((ui) => (ui.sheet?.type === 'weight' ? { sheet: { ...ui.sheet, draft: { ...(ui.sheet.draft || {}), ...draft } } } : null));
+  },
+  stepWeight(ctx, { delta }, ev, el) {
+    const form = el.closest('form');
+    const input = form?.elements?.weight;
+    if (!input) return;
+    const cur = parseNumber(input.value);
+    const next = Math.max(0, (Number.isFinite(cur) ? cur : 0) + Number(delta));
+    input.value = next.toFixed(1);
+    actions.weightDraft(ctx, {}, ev, form);
+  },
+  toggleComp(ctx, data, ev, el) {
+    const form = el.closest('form');
+    if (form) actions.weightDraft(ctx, {}, ev, form);
+    ctx.store.ui((ui) => (ui.sheet ? { sheet: { ...ui.sheet, showComp: !ui.sheet.showComp } } : null));
+  },
+  async saveWeight(ctx, data) {
+    const s = ctx.store.get();
+    const units = s.body?.units || 'metric';
+    const res = validateEntry(data, units, todayKey());
+    if (res.error) return ctx.store.ui((ui) => ({ sheet: { ...ui.sheet, error: res.error } }));
+    const first = !(s.weights || []).length;
+    await ctx.backend.saveWeight(res.entry, { replaceId: s.ui.sheet?.id || null });
+    ctx.closeSheet();
+    ctx.toast(first ? `Logged ${formatWeight(res.entry.weightKg, units)}. Come back whenever you like ⚖️` : `Logged ${formatWeight(res.entry.weightKg, units)}`);
+  },
+  bodyUnits(ctx, data, ev) {
+    const units = ev.target.value === 'imperial' ? 'imperial' : 'metric';
+    ctx.store.ui((ui) => (ui.sheet ? { sheet: { ...ui.sheet, units } } : null));
+  },
+  async saveBody(ctx, data) {
+    const res = validateProfile(data);
+    if (res.error) return ctx.store.ui((ui) => ({ sheet: { ...ui.sheet, error: res.error } }));
+    await ctx.backend.setBody(res.body);
+    ctx.closeSheet();
+    ctx.toast('Saved');
+  },
   swapPhoto(ctx) {
     ctx.store.ui((ui) => ({ sheet: ui.sheet ? { ...ui.sheet, swapped: !ui.sheet.swapped } : null }));
   },
@@ -436,6 +584,10 @@ export const actions = {
       case 'deleteCheckin':
         await b.deleteCheckin(id);
         ctx.toast('Check-in deleted');
+        break;
+      case 'deleteWeight':
+        await b.deleteWeight(id);
+        ctx.toast('Weigh-in deleted');
         break;
       default:
         break;

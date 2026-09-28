@@ -7,6 +7,7 @@ import {
   fromDayKey,
 } from '../core/dates.js';
 import { withHistoryValue } from '../core/logic.js';
+import { shareSummary } from '../core/body.js';
 import { getModel } from '../core/model.js';
 import { hashSeed, makeDemoPhoto, INSET_H, INSET_W, PHOTO_H, PHOTO_W } from '../core/photos.js';
 import { photoCache } from '../core/photo-cache.js';
@@ -35,7 +36,7 @@ const pick = (r, arr) => arr[Math.floor(r() * arr.length)];
 const newId = () => `c${now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 export function createLocalBackend({ store, toast = () => {} }) {
-  let data = null; // { version, pair, checkins, clockOffsetDays }
+  let data = null; // { version, pair, checkins, comments, weights, body, clockOffsetDays }
   let saveTimer = null;
   const timers = new Set();
 
@@ -48,6 +49,8 @@ export function createLocalBackend({ store, toast = () => {} }) {
       pair: data?.pair || null,
       checkins: data?.checkins || [],
       comments: data?.comments || [],
+      weights: data?.weights || [],
+      body: data?.body || null,
       profile: data ? { name: data.pair.names[DEMO_ME], pairId: data.pair.id } : null,
     });
   };
@@ -91,6 +94,38 @@ export function createLocalBackend({ store, toast = () => {} }) {
       demoSeed: { seed: Math.floor(r() * 1e9), scene: SCENE[activity] || '💪', face: pick(r, FACES) },
       ...extra,
     };
+  }
+
+  // Weigh-ins stay private; with sharing on, only the progress summary goes on the pair.
+  function syncBodyShare() {
+    const share = data.body?.share ? shareSummary(data.weights) : null;
+    const next = { ...(data.pair.bodyShare || {}) };
+    if (share) next[DEMO_ME] = { ...share, updatedAt: now() };
+    else delete next[DEMO_ME];
+    data.pair = { ...data.pair, bodyShare: next };
+  }
+
+  function seedWeights(today, r) {
+    const out = [];
+    let day = addDays(today, -60);
+    let w = 82 + r() * 4;
+    let muscle = w * 0.42;
+    while (day < today) {
+      const withComp = r() < 0.5;
+      const fat = w * (0.26 - (60 - diffDays(day, today)) * 0.0004);
+      out.push({
+        id: day,
+        dayKey: day,
+        clientAt: fromDayKey(day).getTime() - 4 * 3600000,
+        weightKg: Math.round((w + (r() - 0.5) * 0.8) * 10) / 10,
+        ...(withComp ? { muscleKg: Math.round(muscle * 10) / 10, fatKg: Math.round(fat * 10) / 10, waterKg: Math.round(w * 0.53 * 10) / 10 } : {}),
+      });
+      const gap = 2 + Math.floor(r() * 13);
+      day = addDays(day, gap);
+      w -= gap * (0.03 + r() * 0.04);
+      muscle += gap * 0.005;
+    }
+    return out;
   }
 
   function generatePhoto(id) {
@@ -167,8 +202,11 @@ export function createLocalBackend({ store, toast = () => {} }) {
         reward: { text: 'Fancy brunch 🥞', target: 4, fromWeek: addDays(cw, -21), setBy: DEMO_PARTNER, setAt: now() - 21 * DAY },
         rewardHistory: [],
         paid: {},
+        bodyShare: { [DEMO_PARTNER]: { deltaKg: -2.4, ratePerWeekKg: -0.35, count: 9, since: addDays(today, -49), updatedAt: now() - 2 * DAY } },
       },
       checkins,
+      weights: seedWeights(today, r),
+      body: { units: 'metric', heightCm: 178, sex: null, birthYear: null, goalKg: 78, share: false },
       comments: (() => {
         const target = checkins.filter((c) => c.uid === DEMO_PARTNER && c.kind === 'photo').sort((a, b) => b.clientAt - a.clientAt)[0];
         if (!target) return [];
@@ -308,6 +346,28 @@ export function createLocalBackend({ store, toast = () => {} }) {
       commit(() => (data.comments = (data.comments || []).filter((c) => c.id !== id || c.uid !== DEMO_ME)));
     },
 
+    // ----- weight & body composition (private) -----
+    async saveWeight(entry, { replaceId = null } = {}) {
+      const id = entry.dayKey;
+      commit(() => {
+        data.weights = [...(data.weights || []).filter((x) => x.id !== id && x.id !== replaceId), { ...entry, id, clientAt: now() }];
+        syncBodyShare();
+      });
+      return id;
+    },
+    async deleteWeight(id) {
+      commit(() => {
+        data.weights = (data.weights || []).filter((x) => x.id !== id);
+        syncBodyShare();
+      });
+    },
+    async setBody(body) {
+      commit(() => {
+        data.body = { ...(data.body || {}), ...body };
+        syncBodyShare();
+      });
+    },
+
     async exportData() {
       const photos = {};
       for (const c of data?.checkins || []) {
@@ -315,7 +375,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
         const p = await photoCache.getData(c.id);
         if (p) photos[c.id] = p;
       }
-      return { pair: data?.pair || null, checkins: data?.checkins || [], comments: data?.comments || [], photos };
+      return { pair: data?.pair || null, checkins: data?.checkins || [], comments: data?.comments || [], weights: data?.weights || [], body: data?.body || null, photos };
     },
 
     // ----- demo-only controls -----

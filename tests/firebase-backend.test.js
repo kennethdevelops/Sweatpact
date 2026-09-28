@@ -9,7 +9,7 @@ import { resetAll, readState } from './fakes/fake-core.js';
 import { createStore } from '../js/core/store.js';
 import { createFirebaseBackend } from '../js/backends/firebase.js';
 import { photoCache } from '../js/core/photo-cache.js';
-import { todayKey, weekStartKey, nextWeek } from '../js/core/dates.js';
+import { addDays, todayKey, weekStartKey, nextWeek } from '../js/core/dates.js';
 import { computeStartWeek, debtKey } from '../js/core/logic.js';
 import { getModel } from '../js/core/model.js';
 
@@ -190,6 +190,40 @@ test('comments sync, are limited to 280 characters, and only your own can be del
   await waitFor(B.store, (s) => !s.comments.some((c) => c.id === id), 'comment deleted');
   const outsider = firestore.getFirestore(app.getApp('phoneC'));
   await assert.rejects(() => firestore.getDocs(firestore.collection(outsider, 'pairs', pairId, 'comments')), /permission/i);
+});
+
+test('weigh-ins are private; only the opt-in progress summary reaches the partner', async () => {
+  const uidA = A.store.get().user.uid;
+  const day1 = addDays(todayKey(), -14);
+  await A.backend.saveWeight({ dayKey: day1, weightKg: 80, fatKg: 20 });
+  await A.backend.saveWeight({ dayKey: todayKey(), weightKg: 79 });
+  const sa = await waitFor(A.store, (s) => s.weights?.length === 2, 'A sees own weigh-ins');
+  assert.equal(sa.weights.find((w) => w.id === day1).fatKg, 20);
+  // Same day again replaces the entry
+  await A.backend.saveWeight({ dayKey: todayKey(), weightKg: 78.8 });
+  await waitFor(A.store, (s) => s.weights.length === 2 && s.weights.some((w) => w.weightKg === 78.8), 'same-day overwrite');
+
+  const dbB = firestore.getFirestore(app.getApp('phoneB'));
+  await assert.rejects(() => firestore.getDocs(firestore.collection(dbB, 'users', uidA, 'weights')), /permission/i);
+  assert.equal(B.store.get().weights?.length || 0, 0, 'partner has no weigh-ins in their state');
+  assert.equal(B.store.get().pair.bodyShare?.[uidA], undefined, 'nothing shared by default');
+
+  await A.backend.setBody({ units: 'metric', heightCm: 180, goalKg: 75, share: true });
+  const sb = await waitFor(B.store, (s) => s.pair.bodyShare?.[uidA], 'B sees progress summary');
+  assert.equal(sb.pair.bodyShare[uidA].deltaKg, -1.2);
+  assert.equal(JSON.stringify(sb.pair.bodyShare[uidA]).includes('80'), false, 'no absolute weight shared');
+  assert.equal((await waitFor(A.store, (s) => s.body?.heightCm === 180, 'profile body saved')).body.goalKg, 75);
+
+  // The partner cannot forge someone else's summary
+  await assert.rejects(() => firestore.updateDoc(firestore.doc(dbB, 'pairs', pairId), { [`bodyShare.${uidA}`]: { deltaKg: 10 } }), /permission/i);
+  // Nonsense weights are refused by the rules
+  const dbA = firestore.getFirestore(app.getApp('phoneA'));
+  await assert.rejects(() => firestore.setDoc(firestore.doc(dbA, 'users', uidA, 'weights', todayKey()), { dayKey: todayKey(), weightKg: 5 }), /permission/i);
+
+  await A.backend.setBody({ share: false });
+  await waitFor(B.store, (s) => !s.pair.bodyShare?.[uidA], 'sharing turned off');
+  await A.backend.deleteWeight(day1);
+  await waitFor(A.store, (s) => s.weights.length === 1, 'weigh-in deleted');
 });
 
 test('gallery photos are tagged', async () => {

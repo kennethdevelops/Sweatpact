@@ -21,6 +21,8 @@ const store = createStore({
   profile: null,
   pair: null,
   checkins: [],
+  weights: [],
+  body: null,
   checkinsLoaded: false,
   pairError: null,
   notice: null,

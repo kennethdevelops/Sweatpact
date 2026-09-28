@@ -36,6 +36,11 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
   const read = op === 'get' || op === 'list';
 
   if (seg[0] === 'users' && seg.length === 2) return signedIn && uid === seg[1];
+  if (seg[0] === 'users' && seg[2] === 'weights' && (seg.length === 4 || (seg.length === 3 && op === 'list'))) {
+    const owner = signedIn && uid === seg[1];
+    if (read || op === 'delete') return owner;
+    return owner && after.dayKey === seg[3] && typeof after.weightKg === 'number' && after.weightKg >= 20 && after.weightKg <= 400;
+  }
 
   if (seg[0] === 'codes' && seg.length === 2) {
     if (op === 'get') return signedIn;
@@ -58,7 +63,8 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
         onlyMyEntry(before, after, 'names', uid) &&
         onlyMyEntry(before, after, 'goals', uid) &&
         onlyMyEntry(before, after, 'pokes', uid) &&
-        onlyMyEntry(before, after, 'pokeSeen', uid);
+        onlyMyEntry(before, after, 'pokeSeen', uid) &&
+        onlyMyEntry(before, after, 'bodyShare', uid);
       const joinPath =
         !members.includes(uid) &&
         members.length < 2 &&

@@ -2,7 +2,8 @@
 // (free Spark plan). The SDK is loaded from Google's CDN, so there is no build step.
 //
 // Data model (see firestore.rules):
-//   users/{uid}                     { name, pairId }
+//   users/{uid}                     { name, pairId, body{} }
+//   users/{uid}/weights/{dayKey}    { dayKey, clientAt, weightKg, muscleKg?, fatKg?, waterKg?, note? }  (private)
 //   codes/{CODE}                    { pairId, createdBy, creatorName, weekStartsOn }
 //   pairs/{pairId}                  { members[], names{}, goals{}, stakes[], weekStartsOn, startWeek, reward, rewardHistory[], paid{} }
 //   pairs/{pairId}/checkins/{id}    { uid, dayKey, clientAt, kind, status, activity, note, hasPhoto, dual, reactions{} }
@@ -12,6 +13,7 @@ import { FIREBASE_SDK_VERSION } from '../config.js';
 import { now, todayKey, weekStartKey } from '../core/dates.js';
 import { computeStartWeek, withHistoryValue } from '../core/logic.js';
 import { getModel } from '../core/model.js';
+import { shareSummary } from '../core/body.js';
 import { photoCache } from '../core/photo-cache.js';
 
 const CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ'; // no 0/O/1/I/L
@@ -86,6 +88,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
   let profileLoaded = false;
   let profileTimer = null;
   let unsubProfile = null;
+  let unsubWeights = null;
   let unsubPair = null;
   let unsubCheckins = null;
   let unsubComments = null;
@@ -139,6 +142,8 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
   function stopAll() {
     unsubProfile?.();
     unsubProfile = null;
+    unsubWeights?.();
+    unsubWeights = null;
     stopPair();
     currentPairId = null;
     clearTimeout(profileTimer);
@@ -240,7 +245,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         profileLoaded = true;
         clearTimeout(profileTimer);
         const d = snap.exists() ? snap.data() : {};
-        store.set({ profile: { name: d.name || '', pairId: d.pairId || null } });
+        store.set({ profile: { name: d.name || '', pairId: d.pairId || null }, body: d.body || null });
         watchPair(d.pairId || null);
         markReady();
       },
@@ -249,6 +254,15 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         store.set({ profile: { name: '', pairId: null } });
         reportError(err, 'profile');
         markReady();
+      },
+    );
+    // Weigh-ins live under the user's own document, so only they can read them.
+    unsubWeights?.();
+    unsubWeights = fs.onSnapshot(
+      fs.query(fs.collection(db, 'users', user.uid, 'weights'), fs.orderBy('dayKey', 'asc'), fs.limit(3000)),
+      (snap) => store.set({ weights: snap.docs.map((d) => ({ ...d.data(), id: d.id })) }),
+      (err) => {
+        if (err?.code !== 'permission-denied') reportError(err, 'weights');
       },
     );
     // First launch while offline: don't hang on the splash screen forever.
@@ -267,7 +281,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
     authKnown = true;
     if (!user) {
       stopAll();
-      store.set({ user: null, profile: null, pair: null, checkins: [], pairError: null });
+      store.set({ user: null, profile: null, pair: null, checkins: [], weights: [], body: null, pairError: null });
       markReady();
       return;
     }
@@ -554,8 +568,37 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
       await photoCache.remove(id);
     },
 
+    // ----- weight & body composition (private) -----
+    // One entry per day: the document id is the day key, so logging the same day again replaces it.
+    async saveWeight(entry, { replaceId = null } = {}) {
+      const me = uid();
+      if (!me) throw new Error('You are not signed in.');
+      const id = entry.dayKey;
+      const doc = { ...entry, clientAt: now() };
+      const batch = fs.writeBatch(db);
+      batch.set(fs.doc(db, 'users', me, 'weights', id), doc);
+      if (replaceId && replaceId !== id) batch.delete(fs.doc(db, 'users', me, 'weights', replaceId));
+      background(batch.commit(), 'saveWeight');
+      const next = [...(S().weights || []).filter((x) => x.id !== id && x.id !== replaceId), { ...doc, id }];
+      syncBodyShare(next, S().body);
+      return id;
+    },
+    async deleteWeight(id) {
+      const me = uid();
+      if (!me) return;
+      background(fs.deleteDoc(fs.doc(db, 'users', me, 'weights', id)), 'deleteWeight');
+      syncBodyShare((S().weights || []).filter((x) => x.id !== id), S().body);
+    },
+    async setBody(body) {
+      const me = uid();
+      if (!me) throw new Error('You are not signed in.');
+      const next = { ...(S().body || {}), ...body };
+      background(fs.setDoc(fs.doc(db, 'users', me), { body: next }, { merge: true }), 'setBody');
+      syncBodyShare(S().weights || [], next);
+    },
+
     async exportData() {
-      const { pair, checkins } = S();
+      const { pair, checkins, weights, body } = S();
       const photos = {};
       for (const c of checkins || []) {
         if (!c.hasPhoto) continue;
@@ -563,7 +606,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         const p = await photoCache.getData(c.id);
         if (p) photos[c.id] = p;
       }
-      return { pair, checkins: (checkins || []).map(({ pending, ...c }) => c), comments: S().comments || [], photos };
+      return { pair, checkins: (checkins || []).map(({ pending, ...c }) => c), comments: S().comments || [], weights: weights || [], body: body || null, photos };
     },
 
     // ----- pokes & comments -----
@@ -592,6 +635,16 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
 
     loadPhoto: (id) => loadPhoto(id),
   };
+
+  // With sharing on, the partner sees only this summary (change since start, weekly rate) on the pair.
+  function syncBodyShare(weights, body) {
+    const pair = S().pair;
+    const me = uid();
+    if (!currentPairId || !pair || !me) return;
+    const share = body?.share ? shareSummary(weights) : null;
+    if (share) background(fs.updateDoc(pairRef(), { [`bodyShare.${me}`]: { ...share, updatedAt: now() } }), 'bodyShare');
+    else if (pair.bodyShare?.[me]) background(fs.updateDoc(pairRef(), { [`bodyShare.${me}`]: fs.deleteField() }), 'bodyShare');
+  }
 
   async function loadPhoto(id) {
     if (!currentPairId) return null;

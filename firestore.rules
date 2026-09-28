@@ -27,9 +27,19 @@ service cloud.firestore {
       return request.resource.data.get(field, {}).diff(resource.data.get(field, {})).affectedKeys().hasOnly([me()]);
     }
 
-    // Your own profile: { name, pairId }
+    // Your own profile: { name, pairId, body }
     match /users/{userId} {
       allow read, write: if signedIn() && me() == userId;
+
+      // Your weigh-ins and body composition. Private: nobody else, not even your partner, can read them.
+      match /weights/{dayKey} {
+        allow read, delete: if signedIn() && me() == userId;
+        allow create, update: if signedIn() && me() == userId
+          && request.resource.data.dayKey == dayKey
+          && request.resource.data.weightKg is number
+          && request.resource.data.weightKg >= 20
+          && request.resource.data.weightKg <= 400;
+      }
     }
 
     // Invite codes. The document id is the code; knowing the code is what lets you join.
@@ -56,7 +66,7 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         // Members can change the pact's settings and can remove people (leave / remove partner),
-        // but can never add anyone, and can only change their own name, goal and pokes.
+        // but can never add anyone, and can only change their own name, goal, pokes and shared body progress.
         (
           me() in resource.data.members
           && request.resource.data.members.hasOnly(resource.data.members)
@@ -66,6 +76,7 @@ service cloud.firestore {
           && onlyMyEntry('goals')
           && onlyMyEntry('pokes')
           && onlyMyEntry('pokeSeen')
+          && onlyMyEntry('bodyShare')
         )
         ||
         // Joining with a code: add yourself to a pact that has a free spot,

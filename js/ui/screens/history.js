@@ -3,6 +3,7 @@ import { html, cx, raw } from '../../lib/dom.js';
 import { icon } from '../../lib/icons.js';
 import { buildStats, monthCalendar, monthKeyOf, shiftMonth } from '../../core/stats.js';
 import { weekRange, dowShort } from '../../core/dates.js';
+import * as body from './body.js';
 import { activityOf, avatar, emptyState, thumbImg, initial, who } from '../components.js';
 
 function outcome(w, m) {
@@ -133,8 +134,11 @@ export function render(state, m) {
     <div class="seg history-seg" role="tablist">
       <label><input type="radio" name="htab" value="weeks" data-change="historyTab" ${tab === 'weeks' ? raw('checked') : ''}><span>Weeks</span></label>
       <label><input type="radio" name="htab" value="stats" data-change="historyTab" ${tab === 'stats' ? raw('checked') : ''}><span>Stats</span></label>
+      <label><input type="radio" name="htab" value="body" data-change="historyTab" ${tab === 'body' ? raw('checked') : ''}><span>Body</span></label>
     </div>
-    ${tab === 'stats'
+    ${tab === 'body'
+      ? body.render(state, m)
+      : tab === 'stats'
       ? statsView(state, m)
       : weeks.length
         ? weeks.map((w) => weekCard(w, m))
@@ -147,7 +151,8 @@ export const actions = {
     ctx.openSheet({ type: 'recap', weekKey: week });
   },
   historyTab(ctx, data, ev) {
-    ctx.store.ui({ historyTab: ev.target.value === 'stats' ? 'stats' : 'weeks' });
+    const v = ev.target.value;
+    ctx.store.ui({ historyTab: v === 'stats' || v === 'body' ? v : 'weeks' });
   },
   statsMonth(ctx, { delta }) {
     const s = ctx.store.get();
