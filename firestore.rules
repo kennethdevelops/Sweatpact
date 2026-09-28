@@ -1,0 +1,120 @@
+rules_version = '2';
+
+// SweatPact – Cloud Firestore security rules.
+// Publish them in the Firebase console → Firestore Database → Rules → paste → Publish.
+// (Or with the Firebase CLI: firebase deploy --only firestore:rules)
+//
+// In short: only the two people in a pact can see or change its data.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function me() {
+      return request.auth.uid;
+    }
+
+    // True when the update only touches the given top-level fields.
+    function onlyChanged(keys) {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys);
+    }
+
+    // True when, inside the map field `field`, only my own entry changed.
+    function onlyMyEntry(field) {
+      return request.resource.data.get(field, {}).diff(resource.data.get(field, {})).affectedKeys().hasOnly([me()]);
+    }
+
+    // Your own profile: { name, pairId }
+    match /users/{userId} {
+      allow read, write: if signedIn() && me() == userId;
+    }
+
+    // Invite codes. The document id is the code; knowing the code is what lets you join.
+    match /codes/{code} {
+      allow get: if signedIn();
+      allow create: if signedIn() && request.resource.data.createdBy == me();
+      allow list, update, delete: if false;
+    }
+
+    match /pairs/{pairId} {
+      function pairData() {
+        return get(/databases/$(database)/documents/pairs/$(pairId)).data;
+      }
+      function isMember() {
+        return signedIn() && me() in pairData().members;
+      }
+
+      allow get: if signedIn() && me() in resource.data.members;
+      allow list: if false;
+
+      allow create: if signedIn()
+        && request.resource.data.members == [me()]
+        && request.resource.data.createdBy == me();
+
+      allow update: if signedIn() && (
+        // Members can change the pact's settings and can remove people (leave / remove partner),
+        // but can never add anyone, and can only change their own name and goal.
+        (
+          me() in resource.data.members
+          && request.resource.data.members.hasOnly(resource.data.members)
+          && request.resource.data.get('createdBy', null) == resource.data.get('createdBy', null)
+          && request.resource.data.get('code', null) == resource.data.get('code', null)
+          && onlyMyEntry('names')
+          && onlyMyEntry('goals')
+        )
+        ||
+        // Joining with a code: add yourself to a pact that has a free spot,
+        // touching nothing but your own name and goal.
+        (
+          !(me() in resource.data.members)
+          && resource.data.members.size() < 2
+          && request.resource.data.members == resource.data.members.concat([me()])
+          && onlyChanged(['members', 'names', 'goals'])
+          && onlyMyEntry('names')
+          && onlyMyEntry('goals')
+        )
+      );
+
+      allow delete: if false;
+
+      match /checkins/{checkinId} {
+        allow read: if isMember();
+
+        // Photo check-ins count right away; pinky promises wait for the partner.
+        allow create: if isMember()
+          && request.resource.data.uid == me()
+          && (
+            (request.resource.data.kind == 'photo' && request.resource.data.status == 'ok')
+            || (request.resource.data.kind == 'promise' && request.resource.data.status == 'pending')
+          );
+
+        allow update: if isMember() && (
+          // Your own check-in: edit the note or activity.
+          (resource.data.uid == me() && onlyChanged(['note', 'activity']))
+          // Your partner's pinky promise: decide if it counts.
+          || (
+            resource.data.uid != me()
+            && resource.data.status == 'pending'
+            && onlyChanged(['status', 'reviewedBy', 'reviewedAt'])
+            && request.resource.data.status in ['ok', 'rejected']
+            && request.resource.data.reviewedBy == me()
+          )
+          // Reactions: add, change or remove only your own emoji.
+          || (onlyChanged(['reactions']) && onlyMyEntry('reactions'))
+        );
+
+        allow delete: if isMember() && resource.data.uid == me();
+      }
+
+      match /photos/{photoId} {
+        allow read: if isMember();
+        allow create: if isMember() && request.resource.data.uid == me();
+        allow delete: if isMember() && resource.data.uid == me();
+        allow update: if false;
+      }
+    }
+  }
+}

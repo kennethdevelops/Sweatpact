@@ -1,0 +1,11 @@
+{
+  "name": "sweatpact",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny couples/partner workout accountability web app (PWA). No build step, no dependencies.",
+  "type": "module",
+  "scripts": {
+    "start": "npx --yes http-server . -p 8080 -c-1",
+    "test": "node --test"
+  }
+}
