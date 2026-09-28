@@ -18,6 +18,11 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 | Stakes | “Loser buys dinner.” Whoever misses their weekly goal owes it. There's a ledger of who owes what, with a “settled” button. |
 | Pinky promise 🤙 | Forgot to take a photo? Send a pinky promise for that day and your partner decides if it counts. Also works as a “log without photo.” |
 | Reactions | React to your partner's check-ins with 🔥 💪 👏 ❤️ 😂. |
+| Comments 💬 | Chat under any check-in. Unread comments get a dot. |
+| Poke 👉 | Nudge your partner (“Gym today? 💪”). It shows as a banner on their Home screen. One poke per hour. |
+| Gallery upload | Pick a photo from your library instead of the camera. It's tagged “🖼️ gallery” so it stays honest. |
+| Stats & calendar | History → Stats: a monthly calendar colored by who worked out, plus workouts, per-week average, goal hit rate, best run, favorite activity and stakes won/lost, side by side. |
+| Weekly recap | The first time you open the app in a new week, a recap of last week pops up (also on every week in History). **Share to WhatsApp** turns it into an image. Single check-ins can be shared from the photo viewer too. |
 | Team streak 🔥 | Consecutive weeks where you *both* hit your goals. |
 | Treat yourselves 🎁 | Set a shared reward (“Fancy brunch”) for hitting your goals N weeks in a row, then cash it in. |
 | History | Every week: who hit their goal, what was at stake, all the photos. |
@@ -27,6 +32,8 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 | Light & dark mode | Follows your phone's setting. |
 
 What's *not* possible in a web app: Home Screen **widgets**, and **push notifications** without running a server (see [Ideas for later](#ideas-for-later)).
+
+> **Updating from 1.0?** Version 1.1 added pokes and comments, which need the new rules: paste [`firestore.rules`](firestore.rules) into Firebase → Firestore Database → Rules → **Publish** again.
 
 ---
 
@@ -158,6 +165,8 @@ js/
   firebase-config.js        ← your Firebase config goes here
   core/
     logic.js                The rules of the game: weeks, goals, stakes, streaks, rewards
+    stats.js                Stats, calendar and weekly recap numbers
+    share-card.js           Draws the shareable recap / check-in images, opens WhatsApp
     dates.js                Day/week helpers
     photos.js               Camera capture, cropping, JPEG compression
     photo-cache.js          Keeps photos on the phone so each is downloaded once
@@ -184,6 +193,8 @@ codes/{CODE}                   { pairId, creatorName, ... }        ← how a par
 pairs/{pairId}                 { members, names, goals, stakes, weekStartsOn, startWeek, reward, rewardHistory, paid }
 pairs/{pairId}/checkins/{id}   { uid, dayKey, kind, status, activity, note, reactions, ... }   (small)
 pairs/{pairId}/photos/{id}     { main, inset }                     (compressed JPEGs, fetched only when shown)
+pairs/{pairId}/comments/{id}   { checkinId, uid, text, clientAt }
+(pokes live on the pair document: pokes.{uid} = { text, at }, pokeSeen.{uid} = at)
 ```
 
 Goals and stakes are stored as small histories (`[{from: '2026-09-28', value: 3}, ...]`) so past weeks are always judged by the rules that applied at the time. Streaks, debts and reward progress are computed on the phone from the check-ins — see `js/core/logic.js`.
@@ -200,7 +211,7 @@ On the free Spark plan, Firestore includes 1 GiB of storage, 50K reads/day, 20K 
 ### Security & privacy
 - Only the two members of a pact can read or change its check-ins, photos and settings (enforced by `firestore.rules`).
 - A partner joins by knowing the pact code; a pact never has more than two people.
-- You can only approve your *partner's* pinky promises, only edit or delete your own check-ins, and only set your own reaction.
+- You can only approve your *partner's* pinky promises, only edit or delete your own check-ins and comments, and only set your own reaction and poke.
 - Your photos live in **your own** Firebase project — not on anyone else's server.
 
 ---
@@ -239,6 +250,5 @@ While developing on `localhost`, the service worker always fetches fresh files, 
 
 ## Ideas for later
 
-- **Share a check-in to WhatsApp** (or anywhere) through the phone's share sheet — free, one tap. Only fully automatic messages need the paid WhatsApp Business API.
 - **Push notifications** when your partner checks in. Web push works on installed web apps (iPhone iOS 16.4+ and Android), but sending needs a small server — e.g. Firebase Cloud Functions (paid Blaze plan) or a scheduled GitHub Action.
 - A weekly recap card, monthly stats, or more than two people per pact.

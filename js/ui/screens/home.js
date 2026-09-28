@@ -1,11 +1,11 @@
 // Home: this week's board for both of you, stakes, things to review, and the latest check-ins.
 import { html, cx } from '../../lib/dom.js';
 import { icon } from '../../lib/icons.js';
-import { weekRange, relativeDay, monthDay } from '../../core/dates.js';
+import { weekRange, relativeDay, monthDay, timeAgo } from '../../core/dates.js';
 import { promiseDays } from '../../core/logic.js';
 import { local } from '../../core/platform.js';
 import {
-  activityText, debtLine, dayCell, emptyState, nameOf, postCard, ring, sectionHead, statusPill,
+  activityText, commentsByCheckin, debtLine, dayCell, emptyState, incomingPoke, nameOf, postCard, ring, sectionHead, statusPill,
 } from '../components.js';
 
 function header(m) {
@@ -29,6 +29,7 @@ function boardRow(m, uid, promiseSet) {
       ${ring({ count: mem.count, goal: mem.goal, name: nameOf(m, uid), whoKey: w })}
       <div class="board-name"><b>${name}</b><span>${mem.count} of ${mem.goal} ${mem.goal === 1 ? 'day' : 'days'}</span></div>
       ${statusPill(m.week, uid, m.today)}
+      ${uid !== m.meUid ? html`<button type="button" class="poke-btn" data-action="openSheet" data-sheet="poke" aria-label=${`Poke ${m.names.partner}`}>👉</button>` : ''}
     </div>
     <div class="days">
       ${m.week.days.map((d) => dayCell(m, uid, d, { canPromise: promiseSet.has(d) }))}
@@ -147,13 +148,31 @@ function demoBanner(state) {
   </a>`;
 }
 
+function pokeBanner(state, m) {
+  const p = incomingPoke(state, m);
+  if (!p) return '';
+  return html`<section class="card poke-banner" data-key=${`poke-${p.at}`}>
+    <span class="poke-emoji" aria-hidden="true">👉</span>
+    <div class="poke-body">
+      <b>${m.names.partner} poked you</b>
+      <p>“${p.text}” · ${timeAgo(p.at)}</p>
+      <div class="poke-actions">
+        <button type="button" class="btn btn-sm btn-primary" data-action="pokeSeen" data-at=${p.at} data-then="camera">${icon('camera', { size: 16 })} Check in</button>
+        <button type="button" class="btn btn-sm btn-outline" data-action="openSheet" data-sheet="poke">Poke back</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-action="pokeSeen" data-at=${p.at}>Got it</button>
+      </div>
+    </div>
+  </section>`;
+}
+
 function feed(m, state) {
   const items = m.feed.slice(0, 15);
   const seen = state.ui.seenBefore || 0;
+  const byCheckin = commentsByCheckin(state);
   return html`<section class="feed" aria-label="Latest check-ins">
     ${sectionHead('Latest', m.feed.length > items.length ? '#/history' : '', 'See all')}
     ${items.length
-      ? items.map((c) => postCard(c, m, { isNew: c.uid !== m.meUid && c.clientAt > seen && seen > 0 }))
+      ? items.map((c) => postCard(c, m, { isNew: c.uid !== m.meUid && c.clientAt > seen && seen > 0, comments: byCheckin.get(c.id) || [], seen }))
       : emptyState('📸', 'No check-ins yet', 'Tap the camera button after your next workout. It takes ten seconds.', html`<button type="button" class="btn btn-primary" data-action="openCamera">${icon('camera', { size: 20 })} Check in now</button>`)}
   </section>`;
 }
@@ -162,6 +181,7 @@ export function render(state, m) {
   return html`<main class="screen home" data-key="screen-home">
     ${header(m)}
     ${demoBanner(state)}
+    ${pokeBanner(state, m)}
     ${reviewCards(m)}
     ${board(m, state)}
     ${stakesCard(m)}
@@ -174,6 +194,10 @@ export function render(state, m) {
 }
 
 export const actions = {
+  pokeSeen(ctx, { at, then }) {
+    ctx.backend.markPokeSeen(Number(at));
+    if (then === 'camera') ctx.openCamera();
+  },
   dismissProtect(ctx) {
     local.set('dismissProtect', true);
     ctx.store.refresh();

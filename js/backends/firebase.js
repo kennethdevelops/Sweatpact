@@ -88,6 +88,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
   let unsubProfile = null;
   let unsubPair = null;
   let unsubCheckins = null;
+  let unsubComments = null;
   let currentPairId = null;
   let authUnsub = null;
   let disposed = false;
@@ -129,8 +130,10 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
   function stopPair() {
     unsubPair?.();
     unsubCheckins?.();
+    unsubComments?.();
     unsubPair = null;
     unsubCheckins = null;
+    unsubComments = null;
   }
 
   function stopAll() {
@@ -145,7 +148,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
     if (pairId === currentPairId) return;
     stopPair();
     currentPairId = pairId;
-    store.set({ pair: null, checkins: [], checkinsLoaded: false, pairError: null });
+    store.set({ pair: null, checkins: [], comments: [], checkinsLoaded: false, pairError: null });
     if (!pairId) return;
 
     unsubPair = fs.onSnapshot(
@@ -184,6 +187,19 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
       (err) => {
         if (pairId !== currentPairId) return;
         if (err?.code !== 'permission-denied') reportError(err, 'checkins');
+      },
+    );
+
+    const cq = fs.query(fs.collection(db, 'pairs', pairId, 'comments'), fs.orderBy('clientAt', 'asc'), fs.limit(5000));
+    unsubComments = fs.onSnapshot(
+      cq,
+      (snap) => {
+        if (pairId !== currentPairId) return;
+        store.set({ comments: snap.docs.map((d) => ({ ...d.data(), id: d.id })) });
+      },
+      (err) => {
+        if (pairId !== currentPairId) return;
+        if (err?.code !== 'permission-denied') reportError(err, 'comments');
       },
     );
   }
@@ -478,7 +494,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
     },
 
     // ----- check-ins -----
-    async addCheckin({ kind, dayKey, activity, note, photo }) {
+    async addCheckin({ kind, dayKey, activity, note, photo, source }) {
       requirePair();
       const me = uid();
       const ref = fs.doc(fs.collection(db, 'pairs', currentPairId, 'checkins'));
@@ -493,6 +509,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         activity: activity || null,
         note: note || '',
         hasPhoto: Boolean(photo),
+        source: photo ? (source === 'gallery' ? 'gallery' : 'camera') : null,
         dual: Boolean(photo?.inset),
         reactions: {},
       });
@@ -546,7 +563,31 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         const p = await photoCache.getData(c.id);
         if (p) photos[c.id] = p;
       }
-      return { pair, checkins: (checkins || []).map(({ pending, ...c }) => c), photos };
+      return { pair, checkins: (checkins || []).map(({ pending, ...c }) => c), comments: S().comments || [], photos };
+    },
+
+    // ----- pokes & comments -----
+    async poke(text) {
+      requirePair();
+      const me = uid();
+      background(fs.updateDoc(pairRef(), { [`pokes.${me}`]: { text, at: now() } }), 'poke');
+    },
+    async markPokeSeen(at) {
+      requirePair();
+      background(fs.updateDoc(pairRef(), { [`pokeSeen.${uid()}`]: at }), 'markPokeSeen');
+    },
+    async addComment(checkinId, text) {
+      requirePair();
+      const ref = fs.doc(fs.collection(db, 'pairs', currentPairId, 'comments'));
+      background(
+        fs.setDoc(ref, { checkinId, uid: uid(), text, clientAt: now(), createdAt: fs.serverTimestamp() }),
+        'addComment',
+      );
+      return ref.id;
+    },
+    async deleteComment(id) {
+      requirePair();
+      background(fs.deleteDoc(fs.doc(db, 'pairs', currentPairId, 'comments', id)), 'deleteComment');
     },
 
     loadPhoto: (id) => loadPhoto(id),

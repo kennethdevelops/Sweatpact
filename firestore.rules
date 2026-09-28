@@ -56,7 +56,7 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         // Members can change the pact's settings and can remove people (leave / remove partner),
-        // but can never add anyone, and can only change their own name and goal.
+        // but can never add anyone, and can only change their own name, goal and pokes.
         (
           me() in resource.data.members
           && request.resource.data.members.hasOnly(resource.data.members)
@@ -64,6 +64,8 @@ service cloud.firestore {
           && request.resource.data.get('code', null) == resource.data.get('code', null)
           && onlyMyEntry('names')
           && onlyMyEntry('goals')
+          && onlyMyEntry('pokes')
+          && onlyMyEntry('pokeSeen')
         )
         ||
         // Joining with a code: add yourself to a pact that has a free spot,
@@ -107,6 +109,19 @@ service cloud.firestore {
         );
 
         allow delete: if isMember() && resource.data.uid == me();
+      }
+
+      // Comments on check-ins: post as yourself, up to 280 characters; delete only your own.
+      match /comments/{commentId} {
+        allow read: if isMember();
+        allow create: if isMember()
+          && request.resource.data.uid == me()
+          && request.resource.data.checkinId is string
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 280;
+        allow delete: if isMember() && resource.data.uid == me();
+        allow update: if false;
       }
 
       match /photos/{photoId} {

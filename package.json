@@ -1,6 +1,6 @@
 {
   "name": "sweatpact",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "A tiny couples/partner workout accountability web app (PWA). No build step, no dependencies.",
   "type": "module",

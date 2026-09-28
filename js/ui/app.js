@@ -12,7 +12,7 @@ import * as historyScreen from './screens/history.js';
 import * as pact from './screens/pact.js';
 import * as settings from './screens/settings.js';
 import * as sheets from './sheets.js';
-import { celebrateView, splash, tabbar, toastView } from './components.js';
+import { celebrateView, incomingPoke, splash, tabbar, toastView } from './components.js';
 import { closeCamera, isCameraOpen, openCamera } from './camera.js';
 
 const SCREENS = { home, history: historyScreen, pact, settings };
@@ -107,12 +107,12 @@ export function createApp({ root, store }) {
       if (history.state?.camera) historyBack();
     },
 
-    async submitCheckin({ kind, dayKey, activity, note, photo }) {
+    async submitCheckin({ kind, dayKey, activity, note, photo, source }) {
       const state = store.get();
       const m = getModel(state);
       const day = dayKey || todayKey();
       try {
-        const id = await ctx.backend.addCheckin({ kind, dayKey: day, activity, note, photo });
+        const id = await ctx.backend.addCheckin({ kind, dayKey: day, activity, note, photo, source });
         if (kind === 'promise') {
           haptic(15);
           ctx.toast(`Pinky promise sent to ${m.names.partner} 🤙`);
@@ -149,8 +149,8 @@ export function createApp({ root, store }) {
     openPromise(c, { day }) {
       ctx.openSheet({ type: 'promise', day: day || null });
     },
-    openViewer(c, { id }) {
-      ctx.openSheet({ type: 'viewer', id, swapped: false });
+    openViewer(c, { id, focus }) {
+      ctx.openSheet({ type: 'viewer', id, swapped: false, focus: focus || null });
     },
     openSheet(c, { sheet, mode }) {
       ctx.openSheet({ type: sheet, mode: mode || null });
@@ -279,7 +279,7 @@ export function createApp({ root, store }) {
       main = splash('Loading your pact…');
     } else {
       view = route;
-      main = html`${(SCREENS[route] || home).render(state, m)}${tabbar(route, m)}`;
+      main = html`${(SCREENS[route] || home).render(state, m)}${tabbar(route, m, incomingPoke(state, m) ? 1 : 0)}`;
     }
     const inApp = view === route;
     const sheet = inApp || state.ui.sheet?.type === 'account' ? sheets.render(state, m) : '';
@@ -295,7 +295,7 @@ export function createApp({ root, store }) {
       if (view === 'onboarding') root.querySelector('.ob [autofocus]')?.focus({ preventScroll: true });
     }
     const sheetKey = sheet ? `${state.ui.sheet.type}:${state.ui.sheet.id || ''}` : '';
-    if (sheetKey && sheetKey !== lastSheet) root.querySelector('.sheet [autofocus]')?.focus({ preventScroll: true });
+    if (sheetKey && sheetKey !== lastSheet) root.querySelector('.sheet [autofocus], .viewer [autofocus]')?.focus({ preventScroll: true });
     lastView = viewKey;
     lastSheet = sheetKey;
   }

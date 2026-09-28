@@ -163,6 +163,41 @@ test('settings: goal, stakes, reward, paid marks', async () => {
   assert.equal(nextWeek(weekStartKey(todayKey(), 1)) > todayKey(), true);
 });
 
+test('pokes: only your own entry; partner sees it and marks it seen', async () => {
+  const uidA = A.store.get().user.uid;
+  const uidB = B.store.get().user.uid;
+  await A.backend.poke('Gym today? 💪');
+  const sb = await waitFor(B.store, (s) => s.pair.pokes?.[uidA]?.text === 'Gym today? 💪', 'B sees poke');
+  const at = sb.pair.pokes[uidA].at;
+  await B.backend.markPokeSeen(at);
+  await waitFor(A.store, (s) => s.pair.pokeSeen?.[uidB] === at, 'A sees seen mark');
+  // Forging a poke from the partner is refused by the rules
+  await assert.rejects(() => firestore.updateDoc(firestore.doc(firestore.getFirestore(app.getApp('phoneA')), 'pairs', pairId), { [`pokes.${uidB}`]: { text: 'fake', at: 1 } }), /permission/i);
+});
+
+test('comments sync, are limited to 280 characters, and only your own can be deleted', async () => {
+  const cid = B.store.get().checkins[0].id;
+  const id = await A.backend.addComment(cid, 'Nice one! 🔥');
+  const sb = await waitFor(B.store, (s) => s.comments?.some((c) => c.id === id), 'B sees comment');
+  assert.equal(sb.comments.find((c) => c.id === id).checkinId, cid);
+  const dbB = firestore.getFirestore(app.getApp('phoneB'));
+  await assert.rejects(() => firestore.deleteDoc(firestore.doc(dbB, 'pairs', pairId, 'comments', id)), /permission/i);
+  await assert.rejects(
+    () => firestore.setDoc(firestore.doc(dbB, 'pairs', pairId, 'comments', 'long'), { checkinId: cid, uid: B.store.get().user.uid, text: 'x'.repeat(281), clientAt: 1 }),
+    /permission/i,
+  );
+  await A.backend.deleteComment(id);
+  await waitFor(B.store, (s) => !s.comments.some((c) => c.id === id), 'comment deleted');
+  const outsider = firestore.getFirestore(app.getApp('phoneC'));
+  await assert.rejects(() => firestore.getDocs(firestore.collection(outsider, 'pairs', pairId, 'comments')), /permission/i);
+});
+
+test('gallery photos are tagged', async () => {
+  const id = await B.backend.addCheckin({ kind: 'photo', dayKey: todayKey(), activity: 'gym', note: '', photo: { main: TINY_JPEG, inset: null }, source: 'gallery' });
+  const sa = await waitFor(A.store, (s) => s.checkins.some((c) => c.id === id), 'A sees gallery check-in');
+  assert.equal(sa.checkins.find((c) => c.id === id).source, 'gallery');
+});
+
 test('delete own check-in (and its photo)', async () => {
   await A.backend.deleteCheckin(photoId);
   await waitFor(B.store, (s) => !s.checkins.some((c) => c.id === photoId), 'B sees deletion');

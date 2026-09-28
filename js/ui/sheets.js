@@ -1,11 +1,13 @@
 // Bottom sheets and the full-screen photo viewer.
 import { html, raw, cx } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
-import { fullDay, relativeDay, dowShort, timeOfDay, fromDayKey, weekStartKey } from '../core/dates.js';
+import { fullDay, relativeDay, dowShort, timeOfDay, fromDayKey, weekStartKey, timeAgo, now, weekRange, prevWeek } from '../core/dates.js';
+import { weekRecap } from '../core/stats.js';
+import { renderCheckinImage, renderRecapImage, shareToWhatsApp } from '../core/share-card.js';
 import { promiseDays } from '../core/logic.js';
 import { photoCache } from '../core/photo-cache.js';
-import { ACTIVITIES, MAX_NAME, MAX_NOTE, MAX_REWARD, MAX_STAKES, REWARD_SUGGESTIONS, STAKES_SUGGESTIONS } from '../config.js';
-import { activityText, nameOf, photoView, promiseBlock, reactionsBar, who } from './components.js';
+import { ACTIVITIES, APP_NAME, MAX_COMMENT, MAX_NAME, MAX_NOTE, MAX_POKE, MAX_REWARD, MAX_STAKES, POKE_COOLDOWN_MIN, POKE_PRESETS, REWARD_SUGGESTIONS, STAKES_SUGGESTIONS } from '../config.js';
+import { activityText, avatar, commentsByCheckin, nameOf, photoView, promiseBlock, reactionsBar, thumbImg, who } from './components.js';
 
 function frame(key, content, { label = '' } = {}) {
   return html`<div class="sheet-layer" data-key=${`sheet-${key}`}>
@@ -161,7 +163,10 @@ function viewer(state, m, sheet) {
     <div class="viewer-top">
       <button type="button" class="viewer-btn" data-action="closeSheet" aria-label="Close">${icon('x', { size: 24 })}</button>
       <div class="viewer-title"><b>${mine ? 'You' : name}</b><span>${fullDay(c.dayKey)} · ${timeOfDay(c.clientAt)}</span></div>
-      ${mine ? html`<button type="button" class="viewer-btn" data-action="confirm" data-kind="deleteCheckin" data-id=${c.id} aria-label="Delete">${icon('trash', { size: 22 })}</button>` : html`<span class="viewer-btn-spacer"></span>`}
+      <div class="viewer-actions">
+        ${c.hasPhoto && c.status === 'ok' ? html`<button type="button" class="viewer-btn" data-action="shareCheckin" data-id=${c.id} aria-label="Share to WhatsApp">${icon('share', { size: 22 })}</button>` : ''}
+        ${mine ? html`<button type="button" class="viewer-btn" data-action="confirm" data-kind="deleteCheckin" data-id=${c.id} aria-label="Delete">${icon('trash', { size: 22 })}</button>` : ''}
+      </div>
     </div>
     <div class="viewer-stage" data-who=${w}>
       ${c.hasPhoto
@@ -172,6 +177,7 @@ function viewer(state, m, sheet) {
     <div class="viewer-info">
       <div class="viewer-meta">
         ${c.activity ? html`<span class="pill muted">${activityText(c.activity)}</span>` : ''}
+        ${c.source === 'gallery' ? html`<span class="pill muted">🖼️ From gallery</span>` : ''}
         ${statusText ? html`<span class=${cx('pill', c.status === 'ok' ? 'ok' : c.status === 'pending' ? 'warn' : 'bad')}>${statusText}</span>` : ''}
       </div>
       ${c.note ? html`<p class="viewer-note">${c.note}</p>` : ''}
@@ -181,8 +187,81 @@ function viewer(state, m, sheet) {
             <button type="button" class="btn btn-primary" data-action="review" data-id=${c.id} data-ok="1">Count it 🤙</button>
           </div>`
         : html`<div class="viewer-reactions">${reactionsBar(c, m)}</div>`}
+      ${commentsThread(state, m, c, sheet)}
     </div>
   </div>`;
+}
+
+function commentsThread(state, m, c, sheet) {
+  const list = commentsByCheckin(state).get(c.id) || [];
+  const seen = state.ui.seenBefore || 0;
+  return html`<section class="comments" aria-label="Comments">
+    ${list.map((x) => {
+      const mine = x.uid === m.meUid;
+      return html`<div class=${cx('comment', { 'is-new': !mine && seen && x.clientAt > seen })} data-key=${`cm-${x.id}`}>
+        ${avatar(m.nameOf(x.uid), who(m, x.uid), 'xs')}
+        <div class="comment-body"><b>${mine ? 'You' : m.nameOf(x.uid)}</b> <span>${x.text}</span><small>${timeAgo(x.clientAt)}</small></div>
+        ${mine ? html`<button type="button" class="comment-del" data-action="deleteComment" data-id=${x.id} aria-label="Delete comment">${icon('x', { size: 14 })}</button>` : ''}
+      </div>`;
+    })}
+    <form class="comment-form" data-submit="addComment" autocomplete="off">
+      <input type="hidden" name="checkinId" value=${c.id}>
+      <input class="input dark" name="text" maxlength=${MAX_COMMENT} placeholder=${list.length ? 'Reply…' : 'Add a comment…'} ${sheet.focus === 'comments' ? raw('autofocus') : ''}>
+      <button type="submit" class="btn btn-primary btn-sm" aria-label="Send comment">${icon('send', { size: 18 })}</button>
+    </form>
+  </section>`;
+}
+
+/** Texts and rows for a week's recap (names are real names – this gets shared). */
+export function recapView(m, weekKey) {
+  const r = weekRecap(m, weekKey);
+  const w = r.week;
+  const uids = [m.meUid, m.partnerUid].filter(Boolean);
+  const rows = uids.map((u) => ({ uid: u, name: m.nameOf(u), who: who(m, u), ...w.members[u] }));
+  let outcome;
+  if (!w.counted) outcome = 'Warm-up week – just for fun.';
+  else if (w.bothHit) outcome = 'We both hit our goals! 🎉';
+  else if (r.debts.length) outcome = r.debts.map((d) => `${m.nameOf(d.debtor)} owes ${m.nameOf(d.creditor)}: ${d.stakes}`).join(' · ');
+  else outcome = rows.filter((x) => !x.hit).map((x) => `${x.name} missed`).join(' · ') || 'Nice week!';
+  const streak = weekKey === prevWeek(m.currentWeek) ? m.streak : 0;
+  const shareText = `Our week on ${APP_NAME} (${weekRange(weekKey)}): ${rows.map((x) => `${x.name} ${x.count}/${x.goal} ${x.hit ? '✅' : '❌'}`).join(', ')}. ${outcome}${streak ? ` Streak: ${streak} 🔥` : ''}`;
+  return { r, w, rows, outcome, streak, shareText };
+}
+
+function recapSheet(state, m, sheet) {
+  const v = recapView(m, sheet.weekKey);
+  return frame('recap', html`<div class="recap">
+    <p class="eyebrow">Week recap · ${weekRange(sheet.weekKey)}</p>
+    <h2>${v.w.counted ? (v.w.bothHit ? 'You both crushed it! 🎉' : 'Week in review') : 'Warm-up week'}</h2>
+    <div class="recap-rows">
+      ${v.rows.map((x) => html`<div class="recap-row" data-who=${x.who}>
+        ${avatar(x.name, x.who, 'sm')}<b>${x.uid === m.meUid ? 'You' : x.name}</b>
+        <span class=${cx('recap-score', x.hit ? 'ok' : 'bad')}>${x.count}/${x.goal} ${x.hit ? '✓' : '✗'}</span>
+      </div>`)}
+    </div>
+    <p class="recap-outcome">${v.outcome}</p>
+    ${v.streak ? html`<p class="recap-streak">🔥 ${v.streak}-week streak</p>` : ''}
+    ${v.r.photos.length ? html`<div class="recap-photos">${v.r.photos.map((c) => html`<span class="recap-photo" data-who=${who(m, c.uid)}>${thumbImg(c)}</span>`)}</div>` : ''}
+    <button type="button" class="btn btn-whatsapp btn-block btn-lg" data-action="shareRecap" data-week=${sheet.weekKey} ${sheet.busy ? raw('disabled') : ''}>
+      ${sheet.busy ? html`<span class="spinner"></span> Making the image…` : html`${icon('chat', { size: 20 })} Share to WhatsApp`}
+    </button>
+    <button type="button" class="btn btn-ghost btn-block" data-action="closeSheet">Close</button>
+  </div>`, { label: 'Week recap' });
+}
+
+function pokeSheet(state, m) {
+  const mine = state.pair?.pokes?.[m.meUid];
+  const minsAgo = mine?.at ? Math.floor((now() - mine.at) / 60000) : Infinity;
+  const wait = POKE_COOLDOWN_MIN - minsAgo;
+  return frame('poke', html`<form data-submit="sendPoke">
+    <h2>Poke ${m.names.partner} 👉</h2>
+    <p class="muted">A friendly nudge. They'll see it at the top of their home screen.</p>
+    ${wait > 0
+      ? html`<p class="note">You poked ${m.names.partner} ${minsAgo < 1 ? 'just now' : `${minsAgo} min ago`}. You can poke again in ${wait} min.</p>`
+      : html`<div class="chips suggestions">${POKE_PRESETS.map((t) => html`<button type="button" class="chip-btn" data-action="fillInput" data-name="text" data-value=${t}>${t}</button>`)}</div>
+        <label class="field"><span>Message</span><input class="input" name="text" maxlength=${MAX_POKE} value=${POKE_PRESETS[0]}></label>
+        <button class="btn btn-primary btn-block btn-lg" type="submit">Send poke 👉</button>`}
+  </form>`, { label: 'Poke' });
 }
 
 export function render(state, m) {
@@ -191,6 +270,8 @@ export function render(state, m) {
   switch (sheet.type) {
     case 'viewer': return m ? viewer(state, m, sheet) : '';
     case 'promise': return m ? promiseSheet(state, m, sheet) : '';
+    case 'poke': return m ? pokeSheet(state, m) : '';
+    case 'recap': return m ? recapSheet(state, m, sheet) : '';
     case 'stakes': return m ? stakesSheet(state, m) : '';
     case 'goal': return m ? goalSheet(state, m) : '';
     case 'reward': return m ? rewardSheet(state, m) : '';
@@ -203,7 +284,72 @@ export function render(state, m) {
 
 // ---------------- actions ----------------
 
+// Poking back also dismisses their poke.
+function incomingPokeAt(ctx) {
+  const s = ctx.store.get();
+  const m = ctx.model();
+  const p = m?.partnerUid ? s.pair?.pokes?.[m.partnerUid] : null;
+  return p?.at && p.at > (s.pair?.pokeSeen?.[m.meUid] || 0) ? p.at : 0;
+}
+
 export const actions = {
+  async shareRecap(ctx, { week }) {
+    const m = ctx.model();
+    const v = recapView(m, week);
+    const setSheet = (patch) => ctx.store.ui((ui) => ({ sheet: ui.sheet ? { ...ui.sheet, ...patch } : ui.sheet }));
+    setSheet({ busy: true });
+    try {
+      const photos = [];
+      for (const c of v.r.photos) {
+        const u = await photoCache.ensure(c.id);
+        if (u?.main) photos.push(u.main);
+      }
+      const blob = await renderRecapImage({
+        title: `${m.names.me}${m.hasPartner ? ` & ${m.names.partner}` : ''}`,
+        subtitle: `Week of ${weekRange(week)}`,
+        rows: v.rows.map((x) => ({ name: x.name, count: x.count, goal: x.goal, hit: x.hit, who: x.who })),
+        outcome: v.outcome,
+        streak: v.streak,
+        photos,
+      });
+      await shareToWhatsApp({ blob, text: v.shareText, filename: `sweatpact-week-${week}.jpg` });
+    } catch (err) {
+      console.error(err);
+      ctx.toast("Couldn't make the image");
+    } finally {
+      setSheet({ busy: false });
+    }
+  },
+  async shareCheckin(ctx, { id }) {
+    const s = ctx.store.get();
+    const m = ctx.model();
+    const c = s.checkins.find((x) => x.id === id);
+    if (!c) return;
+    const u = await photoCache.ensure(c.id);
+    const name = m.nameOf(c.uid);
+    const line = [activityText(c.activity), fullDay(c.dayKey)].filter(Boolean).join(' · ');
+    const blob = await renderCheckinImage({ name, line, note: c.note, main: u?.main, inset: u?.inset });
+    await shareToWhatsApp({ blob, text: `${name} checked in 💪 ${line}${c.note ? ` – “${c.note}”` : ''}`, filename: 'sweatpact-checkin.jpg' });
+  },
+  async sendPoke(ctx, data) {
+    const text = String(data.text || '').trim().slice(0, MAX_POKE);
+    if (!text) return ctx.toast('Write a message first');
+    const m = ctx.model();
+    const seen = incomingPokeAt(ctx);
+    await ctx.backend.poke(text);
+    if (seen) ctx.backend.markPokeSeen(seen);
+    ctx.closeSheet();
+    ctx.toast(`Poked ${m.names.partner} 👉`);
+  },
+  async addComment(ctx, data, ev, form) {
+    const text = String(data.text || '').trim().slice(0, MAX_COMMENT);
+    if (!text) return;
+    await ctx.backend.addComment(data.checkinId, text);
+    form.elements.text.value = '';
+  },
+  async deleteComment(ctx, { id }) {
+    await ctx.backend.deleteComment(id);
+  },
   async sendPromise(ctx, data) {
     if (!data.day) return ctx.toast('Pick a day first');
     ctx.closeSheet();

@@ -141,7 +141,31 @@ export function promiseBlock(c, m) {
   </div>`;
 }
 
-export function postCard(c, m, { isNew = false } = {}) {
+// ----- comments & pokes helpers -----
+let commentsMemo = { src: null, map: new Map() };
+export function commentsByCheckin(state) {
+  const list = state.comments || [];
+  if (commentsMemo.src === list) return commentsMemo.map;
+  const map = new Map();
+  for (const c of list) {
+    if (!map.has(c.checkinId)) map.set(c.checkinId, []);
+    map.get(c.checkinId).push(c);
+  }
+  for (const arr of map.values()) arr.sort((a, b) => a.clientAt - b.clientAt);
+  commentsMemo = { src: list, map };
+  return map;
+}
+export const unreadComments = (list, m, seen) => (seen ? list.filter((x) => x.uid !== m.meUid && x.clientAt > seen).length : 0);
+
+/** The partner's poke I haven't dismissed yet, or null. */
+export function incomingPoke(state, m) {
+  if (!m.partnerUid) return null;
+  const p = state.pair?.pokes?.[m.partnerUid];
+  if (!p?.at) return null;
+  return p.at > (state.pair?.pokeSeen?.[m.meUid] || 0) ? p : null;
+}
+
+export function postCard(c, m, { isNew = false, comments = [], seen = 0 } = {}) {
   const w = who(m, c.uid);
   const name = nameOf(m, c.uid);
   const act = activityText(c.activity);
@@ -150,6 +174,7 @@ export function postCard(c, m, { isNew = false } = {}) {
     <header class="post-head">
       ${avatar(name, w, 'sm')}
       <div class="post-meta"><b>${name}</b><span>${meta}</span></div>
+      ${c.source === 'gallery' ? html`<span class="gallery-tag" title="Picked from the photo gallery">🖼️ gallery</span>` : ''}
       ${isNew ? html`<span class="new-badge">New</span>` : ''}
       ${c.pending ? html`<span class="sync-dot" title="Waiting to sync">${icon('refresh', { size: 14 })}</span>` : ''}
     </header>
@@ -157,11 +182,15 @@ export function postCard(c, m, { isNew = false } = {}) {
       ? html`<button type="button" class="photo-btn" data-action="openViewer" data-id=${c.id} aria-label="Open photo">${photoView(c)}</button>`
       : promiseBlock(c, m)}
     ${c.note ? html`<p class="post-note">${c.note}</p>` : ''}
-    <footer class="post-foot">${reactionsBar(c, m)}</footer>
+    <footer class="post-foot">
+      ${reactionsBar(c, m)}
+      <button type="button" class=${cx('comment-btn', { unread: unreadComments(comments, m, seen) })} data-action="openViewer" data-id=${c.id} data-focus="comments"
+          aria-label=${`${comments.length} comments`}>💬${comments.length ? html` <b>${comments.length}</b>` : ''}</button>
+    </footer>
   </article>`;
 }
 
-export function tabbar(route, m) {
+export function tabbar(route, m, extraHomeBadge = 0) {
   const tab = (id, label, ic, badge = 0) =>
     html`<a href=${`#/${id}`} class=${cx('tab', { active: route === id })} aria-current=${route === id ? 'page' : 'false'}>
       <span class="tab-icon">${icon(ic, { size: 24 })}${badge ? html`<span class="tab-badge">${badge}</span>` : ''}</span>
@@ -169,7 +198,7 @@ export function tabbar(route, m) {
     </a>`;
   const pactBadge = (m?.reward?.unlocked ? 1 : 0) + (m?.unpaidDebts?.length || 0) > 0 ? '!' : 0;
   return html`<nav class="tabbar" aria-label="Main">
-    ${tab('home', 'Home', 'home', m?.toReview?.length || 0)}
+    ${tab('home', 'Home', 'home', (m?.toReview?.length || 0) + (extraHomeBadge || 0))}
     ${tab('history', 'History', 'history')}
     <button type="button" class="tab-cta" data-action="openCamera" aria-label="Check in with a photo">${icon('camera', { size: 28, stroke: 2.2 })}</button>
     ${tab('pact', 'Pact', 'trophy', pactBadge)}

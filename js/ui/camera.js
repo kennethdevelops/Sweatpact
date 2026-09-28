@@ -93,12 +93,12 @@ export function openCamera(ctx) {
     }
   }
 
-  async function useFile(file) {
+  async function useFile(file, source) {
     if (!file) return;
     try {
       const url = (await fileToCanvas(file)).toDataURL('image/jpeg', 0.9);
       stopStream();
-      set({ shots: [{ url, facing: 'file' }], step: 'review', error: '' });
+      set({ shots: [{ url, facing: source }], step: 'review', error: '', swapped: false });
     } catch {
       ctx.toast("Couldn't read that photo");
     }
@@ -114,7 +114,8 @@ export function openCamera(ctx) {
       const [a, b] = st.swapped && st.shots[1] ? [st.shots[1], st.shots[0]] : st.shots;
       const photo = await buildCheckinPhoto(a.url, b?.url || null);
       close();
-      await ctx.submitCheckin({ kind: 'photo', activity, note, photo });
+      const source = st.shots.some((s) => s.facing === 'gallery') ? 'gallery' : 'camera';
+      await ctx.submitCheckin({ kind: 'photo', activity, note, photo, source });
     } catch (err) {
       console.error(err);
       set({ busy: false });
@@ -159,7 +160,8 @@ export function openCamera(ctx) {
       set({ shots: [], step: 'first', swapped: false });
       start('user');
     } else if (what === 'swap') set({ swapped: !st.swapped });
-    else if (what === 'file') root.querySelector('input[type=file]')?.click();
+    else if (what === 'file') root.querySelector('input.cam-file')?.click();
+    else if (what === 'gallery') root.querySelector('input.gal-file')?.click();
     else if (what === 'retry') start(st.facing);
     else if (what === 'promise') {
       close();
@@ -173,7 +175,10 @@ export function openCamera(ctx) {
     post(form);
   }
   function onChange(e) {
-    if (e.target.matches('input[type=file]')) useFile(e.target.files?.[0]);
+    if (e.target.matches('input[type=file]')) {
+      useFile(e.target.files?.[0], e.target.classList.contains('gal-file') ? 'gallery' : 'camera');
+      e.target.value = '';
+    }
     if (e.target.name === 'activity') st.activity = e.target.value;
   }
 
@@ -185,6 +190,7 @@ export function openCamera(ctx) {
       <p>${denied ? 'Allow camera access for this app in your browser or phone settings, or use your phone’s camera app instead.' : 'You can still take a photo with your phone’s camera app.'}</p>
       <div class="cam-error-actions">
         <button type="button" class="btn btn-primary" data-cam="file">${icon('camera', { size: 18 })} Use camera app</button>
+        <button type="button" class="btn btn-ghost-light" data-cam="gallery">${icon('image', { size: 18 })} Choose from gallery</button>
         ${denied ? html`<button type="button" class="btn btn-ghost-light" data-cam="retry">Try again</button>` : ''}
         <button type="button" class="btn btn-ghost-light" data-cam="promise">Pinky promise instead 🤙</button>
       </div>
@@ -228,7 +234,7 @@ export function openCamera(ctx) {
               ? html`<button type="button" class="cam-text-btn" data-cam="promise">No photo?<br>Pinky promise</button>`
               : html`<button type="button" class="cam-text-btn" data-cam="skip">Skip</button>`}</div>
             <button type="button" class="shutter" data-cam="shoot" aria-label="Take photo" ${st.starting || st.error ? raw('disabled') : ''}><span></span></button>
-            <div class="cam-side"><button type="button" class="cam-text-btn" data-cam="file">Camera<br>app</button></div>
+            <div class="cam-side"><button type="button" class="cam-text-btn cam-gallery" data-cam="gallery">${icon('image', { size: 26 })}<span>Gallery</span></button></div>
           </div>`
         : html`<form class="cam-review" data-cam-form>
             <div class="chips chips-scroll" role="radiogroup" aria-label="Activity">
@@ -240,7 +246,8 @@ export function openCamera(ctx) {
               <button type="submit" class="btn btn-primary btn-lg" ${st.busy ? raw('disabled') : ''}>${st.busy ? html`<span class="spinner"></span> Posting…` : 'Post check-in'}</button>
             </div>
           </form>`}
-      <input type="file" accept="image/*" capture="user" hidden>
+      <input class="cam-file" type="file" accept="image/*" capture="user" hidden>
+      <input class="gal-file" type="file" accept="image/*" hidden>
     </div>`;
   }
 

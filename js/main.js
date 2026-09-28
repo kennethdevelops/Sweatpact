@@ -1,6 +1,8 @@
 // Entry point: picks a backend (Firebase or demo), starts the UI, registers the service worker.
 import { createStore } from './core/store.js';
-import { createApp, routeFromHash } from './ui/app.js';
+import { createApp, needsOnboarding, routeFromHash } from './ui/app.js';
+import { getModel } from './core/model.js';
+import { prevWeek } from './core/dates.js';
 import { photoCache } from './core/photo-cache.js';
 import { now } from './core/dates.js';
 import { firebaseConfig } from './firebase-config.js';
@@ -66,6 +68,23 @@ document.addEventListener('visibilitychange', () => {
   if (!seenUid) return;
   if (document.hidden) local.set(`seen.${seenUid}`, now());
   else store.ui({ seenBefore: local.get(`seen.${seenUid}`) || 0 });
+});
+
+// Weekly recap: the first time the app is opened in a new week, show how last week went.
+store.subscribe((s) => {
+  if (s.boot !== 'ready' || !s.pair || !s.user || s.ui.sheet || s.ui.celebrate || needsOnboarding(s)) return;
+  if (s.mode === 'firebase' && !s.checkinsLoaded) return;
+  if (document.getElementById('camera-root')?.hidden === false) return;
+  const m = getModel(s);
+  if (!m?.hasPartner) return;
+  const key = `recapSeen.${s.user.uid}`;
+  const seen = local.get(key);
+  if (seen === m.currentWeek) return;
+  local.set(key, m.currentWeek);
+  if (!seen) return; // brand-new install: nothing to recap yet
+  const last = prevWeek(m.currentWeek);
+  const w = m.summary(last);
+  if (w.checkins.length || w.counted) ctx.openSheet({ type: 'recap', weekKey: last });
 });
 
 window.addEventListener('online', () => store.set({ online: true }));

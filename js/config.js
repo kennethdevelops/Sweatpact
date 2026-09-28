@@ -1,7 +1,7 @@
 // App-wide settings. Rename the app here (and in manifest.webmanifest + index.html).
 export const APP_NAME = 'SweatPact';
 export const APP_TAGLINE = 'Show up together.';
-export const APP_VERSION = '1.0.0';
+export const APP_VERSION = '1.1.0';
 
 // Firebase JS SDK version loaded from Google's CDN (www.gstatic.com/firebasejs/<version>/...).
 // To upgrade, change this to any version listed at https://firebase.google.com/support/release-notes/js
@@ -44,3 +44,8 @@ export const REWARD_SUGGESTIONS = [
 ];
 
 export const REACTIONS = ['🔥', '💪', '👏', '❤️', '😂'];
+
+export const POKE_PRESETS = ['Gym today? 💪', 'Your turn! 👀', "Don't make me buy dinner 😤", 'Miss you at the gym 🥺', 'Race you! 🏃'];
+export const POKE_COOLDOWN_MIN = 60;
+export const MAX_POKE = 80;
+export const MAX_COMMENT = 280;

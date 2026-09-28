@@ -90,6 +90,7 @@ function demoCard(state, m) {
     <div class="demo-grid">
       <button type="button" class="btn btn-sm btn-outline" data-action="demoPartnerCheckIn">📸 ${m.names.partner} checks in</button>
       <button type="button" class="btn btn-sm btn-outline" data-action="demoPartnerPromise">🤙 ${m.names.partner} pinky promises</button>
+      <button type="button" class="btn btn-sm btn-outline" data-action="demoPartnerPoke">👉 ${m.names.partner} pokes you</button>
       <button type="button" class="btn btn-sm btn-outline" data-action="demoJumpWeek">⏭️ Skip to next week</button>
       <button type="button" class="btn btn-sm btn-danger" data-action="confirm" data-kind="resetDemo">Reset demo</button>
     </div>
@@ -135,6 +136,10 @@ export const actions = {
   },
   demoPartnerCheckIn(ctx) {
     ctx.backend.demo.partnerCheckIn();
+  },
+  demoPartnerPoke(ctx) {
+    ctx.backend.demo.partnerPoke();
+    ctx.go('home');
   },
   demoPartnerPromise(ctx) {
     ctx.backend.demo.partnerPromise();

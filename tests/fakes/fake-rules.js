@@ -56,7 +56,9 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
         eq(after.createdBy ?? null, before.createdBy ?? null) &&
         eq(after.code ?? null, before.code ?? null) &&
         onlyMyEntry(before, after, 'names', uid) &&
-        onlyMyEntry(before, after, 'goals', uid);
+        onlyMyEntry(before, after, 'goals', uid) &&
+        onlyMyEntry(before, after, 'pokes', uid) &&
+        onlyMyEntry(before, after, 'pokeSeen', uid);
       const joinPath =
         !members.includes(uid) &&
         members.length < 2 &&
@@ -95,6 +97,15 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
         return ownEdit || review || react;
       }
       if (op === 'delete') return isMember && before?.uid === uid;
+    }
+
+    if (sub === 'comments') {
+      if (read) return isMember;
+      if (op === 'create') {
+        return isMember && after.uid === uid && typeof after.checkinId === 'string' && typeof after.text === 'string' && after.text.length > 0 && after.text.length <= 280;
+      }
+      if (op === 'delete') return isMember && before?.uid === uid;
+      return false;
     }
 
     if (sub === 'photos') {

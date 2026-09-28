@@ -47,6 +47,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
     store.set({
       pair: data?.pair || null,
       checkins: data?.checkins || [],
+      comments: data?.comments || [],
       profile: data ? { name: data.pair.names[DEMO_ME], pairId: data.pair.id } : null,
     });
   };
@@ -168,6 +169,14 @@ export function createLocalBackend({ store, toast = () => {} }) {
         paid: {},
       },
       checkins,
+      comments: (() => {
+        const target = checkins.filter((c) => c.uid === DEMO_PARTNER && c.kind === 'photo').sort((a, b) => b.clientAt - a.clientAt)[0];
+        if (!target) return [];
+        return [
+          { id: newId() + 'a', checkinId: target.id, uid: DEMO_ME, text: 'Look at you go! 🔥', clientAt: target.clientAt + 3600000 },
+          { id: newId() + 'b', checkinId: target.id, uid: DEMO_PARTNER, text: 'Your turn tomorrow 😏', clientAt: target.clientAt + 5400000 },
+        ];
+      })(),
     };
   }
 
@@ -227,7 +236,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
     },
 
     // ----- check-ins -----
-    async addCheckin({ kind, dayKey, activity, note, photo }) {
+    async addCheckin({ kind, dayKey, activity, note, photo, source }) {
       const id = newId();
       const c = {
         id,
@@ -239,6 +248,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
         activity: activity || null,
         note: note || '',
         hasPhoto: Boolean(photo),
+        source: photo ? (source === 'gallery' ? 'gallery' : 'camera') : null,
         dual: Boolean(photo?.inset),
         reactions: {},
       };
@@ -276,6 +286,28 @@ export function createLocalBackend({ store, toast = () => {} }) {
       await photoCache.remove(id);
     },
 
+    // ----- pokes & comments -----
+    async poke(text) {
+      updatePair({ pokes: { ...(data.pair.pokes || {}), [DEMO_ME]: { text, at: now() } } });
+      later(4000, () => {
+        const replies = ['On my way to the gym 🏃', 'Already did mine today 😎', 'Ugh fine, going now 😤', 'You first! 😂'];
+        updatePair({ pokes: { ...(data.pair.pokes || {}), [DEMO_PARTNER]: { text: pick(Math.random, replies), at: now() } } });
+      });
+    },
+    async markPokeSeen(at) {
+      updatePair({ pokeSeen: { ...(data.pair.pokeSeen || {}), [DEMO_ME]: at } });
+    },
+    async addComment(checkinId, text) {
+      const id = newId();
+      const add = (uid, t) => commit(() => (data.comments = [...(data.comments || []), { id: newId(), checkinId, uid, text: t, clientAt: now() }]));
+      commit(() => (data.comments = [...(data.comments || []), { id, checkinId, uid: DEMO_ME, text, clientAt: now() }]));
+      later(3000, () => add(DEMO_PARTNER, pick(Math.random, ['😂😂', 'Love this!', 'Show off 😏', 'Proud of you ❤️', 'Next time I’m coming too'])));
+      return id;
+    },
+    async deleteComment(id) {
+      commit(() => (data.comments = (data.comments || []).filter((c) => c.id !== id || c.uid !== DEMO_ME)));
+    },
+
     async exportData() {
       const photos = {};
       for (const c of data?.checkins || []) {
@@ -283,11 +315,15 @@ export function createLocalBackend({ store, toast = () => {} }) {
         const p = await photoCache.getData(c.id);
         if (p) photos[c.id] = p;
       }
-      return { pair: data?.pair || null, checkins: data?.checkins || [], photos };
+      return { pair: data?.pair || null, checkins: data?.checkins || [], comments: data?.comments || [], photos };
     },
 
     // ----- demo-only controls -----
     demo: {
+      partnerPoke() {
+        updatePair({ pokes: { ...(data.pair.pokes || {}), [DEMO_PARTNER]: { text: 'Gym today? 💪', at: now() } } });
+        toast(`${partnerName()} poked you 👉`);
+      },
       partnerCheckIn() {
         const r = rng(Date.now());
         const c = makeSeeded(DEMO_PARTNER, todayKey(), r, { clientAt: now(), note: pick(r, NOTES) });
