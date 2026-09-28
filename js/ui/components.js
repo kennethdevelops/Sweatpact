@@ -2,6 +2,7 @@
 import { html, raw, cx } from '../lib/dom.js';
 import { icon } from '../lib/icons.js';
 import { photoCache } from '../core/photo-cache.js';
+import { dataUrlToBlob } from '../core/photos.js';
 import { dowLetter, relativeDay, timeAgo, monthDay } from '../core/dates.js';
 import { memberStatus } from '../core/logic.js';
 import { ACTIVITIES, REACTIONS, APP_NAME } from '../config.js';
@@ -26,15 +27,42 @@ export function logo(size = 56) {
   </svg>`);
 }
 
-export function avatar(name, whoKey, size = '') {
-  return html`<span class=${cx('avatar', size)} data-who=${whoKey} aria-hidden="true">${initial(name)}</span>`;
+// Profile pictures arrive as JPEG data URLs; render them through short blob: URLs instead.
+const avatarUrls = new Map(); // data URL -> blob: URL
+export function avatarUrl(dataUrl) {
+  if (!dataUrl) return null;
+  let url = avatarUrls.get(dataUrl);
+  if (!url) {
+    try {
+      url = URL.createObjectURL(dataUrlToBlob(dataUrl));
+    } catch {
+      return null;
+    }
+    if (avatarUrls.size > 8) {
+      const [oldest, oldUrl] = avatarUrls.entries().next().value;
+      URL.revokeObjectURL(oldUrl);
+      avatarUrls.delete(oldest);
+    }
+    avatarUrls.set(dataUrl, url);
+  }
+  return url;
+}
+
+function avatarFace(name, src) {
+  const url = avatarUrl(src);
+  return url ? html`<img src=${url} alt="" decoding="async">` : initial(name);
+}
+
+/** Round profile picture, falling back to the initial. `src` is the stored data URL (m.avatarOf(uid)). */
+export function avatar(name, whoKey, size = '', src = null) {
+  return html`<span class=${cx('avatar', size, { 'has-img': avatarUrl(src) })} data-who=${whoKey} aria-hidden="true">${avatarFace(name, src)}</span>`;
 }
 
 const RING_R = 19;
 const RING_C = 2 * Math.PI * RING_R;
 
 /** Progress ring with the member's initial inside. */
-export function ring({ count, goal, name, whoKey, size = 52 }) {
+export function ring({ count, goal, name, whoKey, size = 52, src = null }) {
   const pct = Math.max(0, Math.min(1, goal ? count / goal : 0));
   const offset = (RING_C * (1 - pct)).toFixed(2);
   return html`<span class=${cx('ring', { done: pct >= 1 })} data-who=${whoKey} style=${`--size:${size}px`}>
@@ -42,7 +70,7 @@ export function ring({ count, goal, name, whoKey, size = 52 }) {
       <circle class="ring-track" cx="22" cy="22" r="${RING_R}"></circle>
       <circle class="ring-fill" cx="22" cy="22" r="${RING_R}" stroke-dasharray="${RING_C.toFixed(2)}" stroke-dashoffset="${offset}"></circle>
     </svg>
-    <span class="ring-initial">${initial(name)}</span>
+    <span class=${cx('ring-initial', { 'has-img': avatarUrl(src) })}>${avatarFace(name, src)}</span>
     ${pct >= 1 ? html`<span class="ring-check">${icon('check', { size: 14, stroke: 3 })}</span>` : ''}
   </span>`;
 }
@@ -172,7 +200,7 @@ export function postCard(c, m, { isNew = false, comments = [], seen = 0 } = {}) 
   const meta = [act, c.kind === 'promise' ? `sent ${timeAgo(c.clientAt)}` : timeAgo(c.clientAt)].filter(Boolean).join(' · ');
   return html`<article class=${cx('post', { 'is-new': isNew, 'is-rejected': c.status === 'rejected' })} data-key=${`post-${c.id}`}>
     <header class="post-head">
-      ${avatar(name, w, 'sm')}
+      ${avatar(name, w, 'sm', m.avatarOf(c.uid))}
       <div class="post-meta"><b>${name}</b><span>${meta}</span></div>
       ${c.source === 'gallery' ? html`<span class="gallery-tag" title="Picked from the photo gallery">🖼️ gallery</span>` : ''}
       ${isNew ? html`<span class="new-badge">New</span>` : ''}

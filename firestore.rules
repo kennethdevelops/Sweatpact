@@ -27,7 +27,13 @@ service cloud.firestore {
       return request.resource.data.get(field, {}).diff(resource.data.get(field, {})).affectedKeys().hasOnly([me()]);
     }
 
-    // Your own profile: { name, pairId, body }
+    // A profile picture is a small JPEG data URL (the app makes them ~30 KB).
+    function avatarOk(data) {
+      return !('avatars' in data) || !(me() in data.avatars)
+        || (data.avatars[me()] is string && data.avatars[me()].size() <= 100000);
+    }
+
+    // Your own profile: { name, pairId, avatar, body }
     match /users/{userId} {
       allow read, write: if signedIn() && me() == userId;
 
@@ -66,13 +72,15 @@ service cloud.firestore {
 
       allow update: if signedIn() && (
         // Members can change the pact's settings and can remove people (leave / remove partner),
-        // but can never add anyone, and can only change their own name, goal, pokes and shared body progress.
+        // but can never add anyone, and can only change their own name, picture, goal, pokes and shared body progress.
         (
           me() in resource.data.members
           && request.resource.data.members.hasOnly(resource.data.members)
           && request.resource.data.get('createdBy', null) == resource.data.get('createdBy', null)
           && request.resource.data.get('code', null) == resource.data.get('code', null)
           && onlyMyEntry('names')
+          && onlyMyEntry('avatars')
+          && avatarOk(request.resource.data)
           && onlyMyEntry('goals')
           && onlyMyEntry('pokes')
           && onlyMyEntry('pokeSeen')
@@ -80,13 +88,15 @@ service cloud.firestore {
         )
         ||
         // Joining with a code: add yourself to a pact that has a free spot,
-        // touching nothing but your own name and goal.
+        // touching nothing but your own name, picture and goal.
         (
           !(me() in resource.data.members)
           && resource.data.members.size() < 2
           && request.resource.data.members == resource.data.members.concat([me()])
-          && onlyChanged(['members', 'names', 'goals'])
+          && onlyChanged(['members', 'names', 'avatars', 'goals'])
           && onlyMyEntry('names')
+          && onlyMyEntry('avatars')
+          && avatarOk(request.resource.data)
           && onlyMyEntry('goals')
         )
       );

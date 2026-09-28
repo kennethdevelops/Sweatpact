@@ -1,7 +1,7 @@
 // App-wide settings. Rename the app here (and in manifest.webmanifest + index.html).
 export const APP_NAME = 'SweatPact';
 export const APP_TAGLINE = 'Show up together.';
-export const APP_VERSION = '1.2.0';
+export const APP_VERSION = '1.3.0';
 
 // Firebase JS SDK version loaded from Google's CDN (www.gstatic.com/firebasejs/<version>/...).
 // To upgrade, change this to any version listed at https://firebase.google.com/support/release-notes/js

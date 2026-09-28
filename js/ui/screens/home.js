@@ -26,7 +26,7 @@ function boardRow(m, uid, promiseSet) {
   const name = uid === m.meUid ? 'You' : m.names.partner;
   return html`<div class="board-row" data-who=${w}>
     <div class="board-head">
-      ${ring({ count: mem.count, goal: mem.goal, name: nameOf(m, uid), whoKey: w })}
+      ${ring({ count: mem.count, goal: mem.goal, name: nameOf(m, uid), whoKey: w, src: m.avatarOf(uid) })}
       <div class="board-name"><b>${name}</b><span>${mem.count} of ${mem.goal} ${mem.goal === 1 ? 'day' : 'days'}</span></div>
       ${statusPill(m.week, uid, m.today)}
       ${uid !== m.meUid ? html`<button type="button" class="poke-btn" data-action="openSheet" data-sheet="poke" aria-label=${`Poke ${m.names.partner}`}>👉</button>` : ''}

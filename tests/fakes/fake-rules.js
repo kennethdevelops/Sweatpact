@@ -20,6 +20,7 @@ function affectedKeys(before = {}, after = {}) {
 const hasOnly = (list, allowed) => list.every((k) => allowed.includes(k));
 const onlyChanged = (before, after, keys) => hasOnly(affectedKeys(before, after), keys);
 const onlyMyEntry = (before, after, field, me) => hasOnly(affectedKeys(before?.[field] || {}, after?.[field] || {}), [me]);
+const avatarOk = (after, me) => !(me in (after?.avatars || {})) || (typeof after.avatars[me] === 'string' && after.avatars[me].length <= 100000);
 
 /**
  * @param {object} p
@@ -61,6 +62,8 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
         eq(after.createdBy ?? null, before.createdBy ?? null) &&
         eq(after.code ?? null, before.code ?? null) &&
         onlyMyEntry(before, after, 'names', uid) &&
+        onlyMyEntry(before, after, 'avatars', uid) &&
+        avatarOk(after, uid) &&
         onlyMyEntry(before, after, 'goals', uid) &&
         onlyMyEntry(before, after, 'pokes', uid) &&
         onlyMyEntry(before, after, 'pokeSeen', uid) &&
@@ -69,8 +72,10 @@ export function allowed({ op, path, before, after, uid, getDoc }) {
         !members.includes(uid) &&
         members.length < 2 &&
         eq(after.members, [...members, uid]) &&
-        onlyChanged(before, after, ['members', 'names', 'goals']) &&
+        onlyChanged(before, after, ['members', 'names', 'avatars', 'goals']) &&
         onlyMyEntry(before, after, 'names', uid) &&
+        onlyMyEntry(before, after, 'avatars', uid) &&
+        avatarOk(after, uid) &&
         onlyMyEntry(before, after, 'goals', uid);
       return memberPath || joinPath;
     }

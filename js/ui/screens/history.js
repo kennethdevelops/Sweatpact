@@ -4,7 +4,7 @@ import { icon } from '../../lib/icons.js';
 import { buildStats, monthCalendar, monthKeyOf, shiftMonth } from '../../core/stats.js';
 import { weekRange, dowShort } from '../../core/dates.js';
 import * as body from './body.js';
-import { activityOf, avatar, emptyState, thumbImg, initial, who } from '../components.js';
+import { activityOf, avatar, emptyState, thumbImg, who } from '../components.js';
 
 function outcome(w, m) {
   if (w.isCurrent) return html`<span class="pill muted">In progress</span>`;
@@ -23,7 +23,7 @@ function memberLine(w, m, uid) {
   const name = uid === m.meUid ? 'You' : m.names.partner;
   const mark = x.hit ? '✓' : w.complete ? '✗' : '';
   return html`<div class="wm" data-who=${k}>
-    <span class="avatar xs" data-who=${k}>${initial(uid === m.meUid ? m.names.me : m.names.partner)}</span>
+    ${avatar(m.nameOf(uid), k, 'xs', m.avatarOf(uid))}
     <span class="wm-name">${name}</span>
     <b class=${cx('wm-count', { ok: x.hit, bad: !x.hit && w.complete })}>${x.count}/${x.goal} ${mark}</b>
   </div>`;
@@ -99,9 +99,9 @@ function statsView(state, m) {
     </section>
     <section class="card h2h">
       <div class="h2h-row h2h-head">
-        <span class="h2h-who" data-who="me">${avatar(m.names.me, 'me', 'xs')} You</span>
+        <span class="h2h-who" data-who="me">${avatar(m.names.me, 'me', 'xs', m.avatarOf(m.meUid))} You</span>
         <span></span>
-        ${partner ? html`<span class="h2h-who" data-who="partner">${m.names.partner} ${avatar(m.names.partner, 'partner', 'xs')}</span>` : html`<span></span>`}
+        ${partner ? html`<span class="h2h-who" data-who="partner">${m.names.partner} ${avatar(m.names.partner, 'partner', 'xs', m.avatarOf(m.partnerUid))}</span>` : html`<span></span>`}
       </div>
       ${row('Workouts', st.me.total, st.partner?.total)}
       ${row('This month', st.me.thisMonth, st.partner?.thisMonth)}

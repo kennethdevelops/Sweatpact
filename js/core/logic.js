@@ -192,6 +192,7 @@ export function buildModel({ pair, checkins = [], meUid, today }) {
       partner: partnerUid ? pair.names?.[partnerUid] || 'Partner' : 'Partner',
     },
     nameOf: (uid) => (uid === meUid ? pair.names?.[meUid] || 'You' : pair.names?.[uid] || 'Partner'),
+    avatarOf: (uid) => pair.avatars?.[uid] || null,
     week,
     weeks,
     summary,

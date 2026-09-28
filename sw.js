@@ -4,7 +4,7 @@
 // - Firestore / Auth network calls: never touched (Firestore has its own offline cache).
 //
 // Bump VERSION when you add or rename files so old caches get cleaned up.
-const VERSION = 'v1.2.0';
+const VERSION = 'v1.3.0';
 const CACHE = `sweatpact-${VERSION}`;
 const SDK_CACHE = 'sweatpact-firebase-sdk';
 

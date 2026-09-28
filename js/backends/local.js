@@ -9,7 +9,7 @@ import {
 import { withHistoryValue } from '../core/logic.js';
 import { shareSummary } from '../core/body.js';
 import { getModel } from '../core/model.js';
-import { hashSeed, makeDemoPhoto, INSET_H, INSET_W, PHOTO_H, PHOTO_W } from '../core/photos.js';
+import { hashSeed, makeDemoPhoto, AVATAR_SIZE, INSET_H, INSET_W, PHOTO_H, PHOTO_W } from '../core/photos.js';
 import { photoCache } from '../core/photo-cache.js';
 import { ACTIVITIES, DEMO_PARTNER_NAME, REACTIONS } from '../config.js';
 
@@ -51,7 +51,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
       comments: data?.comments || [],
       weights: data?.weights || [],
       body: data?.body || null,
-      profile: data ? { name: data.pair.names[DEMO_ME], pairId: data.pair.id } : null,
+      profile: data ? { name: data.pair.names[DEMO_ME], pairId: data.pair.id, avatar: data.pair.avatars?.[DEMO_ME] || null } : null,
     });
   };
   const commit = (fn) => {
@@ -195,6 +195,7 @@ export function createLocalBackend({ store, toast = () => {} }) {
         createdBy: DEMO_ME,
         members: [DEMO_ME, DEMO_PARTNER],
         names: { [DEMO_ME]: name, [DEMO_PARTNER]: DEMO_PARTNER_NAME },
+        avatars: { [DEMO_PARTNER]: makeDemoPhoto({ seed: 4242, emoji: '😎', width: AVATAR_SIZE, height: AVATAR_SIZE, selfie: true }) },
         goals: { [DEMO_ME]: [{ from: startWeek, value: goal }], [DEMO_PARTNER]: [{ from: startWeek, value: partnerGoal }] },
         stakes: [{ from: startWeek, value: 'Loser buys dinner 🍝' }],
         weekStartsOn: ws,
@@ -242,6 +243,12 @@ export function createLocalBackend({ store, toast = () => {} }) {
     // ----- pact settings -----
     async setName(name) {
       updatePair({ names: { ...data.pair.names, [DEMO_ME]: name } });
+    },
+    async setAvatar(dataUrl) {
+      const avatars = { ...(data.pair.avatars || {}) };
+      if (dataUrl) avatars[DEMO_ME] = dataUrl;
+      else delete avatars[DEMO_ME];
+      updatePair({ avatars });
     },
     async setGoal(goal) {
       const m = model();

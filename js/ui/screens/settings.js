@@ -4,14 +4,31 @@ import { icon } from '../../lib/icons.js';
 import { APP_NAME, APP_VERSION } from '../../config.js';
 import { canPromptInstall, isIOS, isStandalone, promptInstall, saveFile } from '../../core/platform.js';
 import { getClockOffsetDays, fullDay, todayKey, toDayKey, now } from '../../core/dates.js';
+import { buildAvatar } from '../../core/photos.js';
+import { avatar } from '../components.js';
 
 const row = (label, value, action = '') =>
   html`<div class="list-row"><span class="list-label">${label}</span><span class="list-value">${value}</span>${action}</div>`;
+
+function photoRow(state, m) {
+  const src = m.avatarOf(m.meUid);
+  const busy = state.ui.avatarBusy;
+  return html`<div class="list-row photo-row">
+    ${avatar(m.names.me, 'me', 'lg', src)}
+    <span class="list-label">Profile picture</span>
+    ${src && !busy ? html`<button type="button" class="btn btn-sm btn-ghost" data-action="removeAvatar">Remove</button>` : ''}
+    <label class="btn btn-sm btn-outline">
+      ${busy ? 'Saving…' : src ? 'Change' : html`${icon('camera', { size: 16 })} Add`}
+      <input type="file" accept="image/*" hidden data-change="pickAvatar" ${busy ? raw('disabled') : ''}>
+    </label>
+  </div>`;
+}
 
 function profileCard(state, m) {
   const ws = state.pair?.weekStartsOn ?? 1;
   return html`<section class="card list-card">
     <h2 class="card-title">You</h2>
+    ${photoRow(state, m)}
     ${row('Name', m.names.me, html`<button type="button" class="btn btn-sm btn-outline" data-action="openSheet" data-sheet="name">Edit</button>`)}
     ${row('Weekly goal', `${m.goals.me} ${m.goals.me === 1 ? 'day' : 'days'}`, html`<button type="button" class="btn btn-sm btn-outline" data-action="openSheet" data-sheet="goal">Change</button>`)}
     <div class="list-row">
@@ -113,6 +130,26 @@ export function render(state, m) {
 }
 
 export const actions = {
+  async pickAvatar(ctx, data, ev) {
+    const input = ev.target;
+    const file = input.files?.[0];
+    input.value = ''; // so picking the same photo again still fires "change"
+    if (!file) return;
+    ctx.store.ui({ avatarBusy: true });
+    try {
+      await ctx.backend.setAvatar(await buildAvatar(file));
+      ctx.toast('Looking good 📸');
+    } catch (err) {
+      console.error(err);
+      ctx.toast("Couldn't read that photo");
+    } finally {
+      ctx.store.ui({ avatarBusy: false });
+    }
+  },
+  async removeAvatar(ctx) {
+    await ctx.backend.setAvatar(null);
+    ctx.toast('Profile picture removed');
+  },
   setWeekStart(ctx, data, ev) {
     const v = Number(ev.target.value) === 0 ? 0 : 1;
     ctx.backend.setWeekStart(v);

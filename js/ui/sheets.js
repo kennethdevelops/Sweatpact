@@ -203,7 +203,7 @@ function commentsThread(state, m, c, sheet) {
     ${list.map((x) => {
       const mine = x.uid === m.meUid;
       return html`<div class=${cx('comment', { 'is-new': !mine && seen && x.clientAt > seen })} data-key=${`cm-${x.id}`}>
-        ${avatar(m.nameOf(x.uid), who(m, x.uid), 'xs')}
+        ${avatar(m.nameOf(x.uid), who(m, x.uid), 'xs', m.avatarOf(x.uid))}
         <div class="comment-body"><b>${mine ? 'You' : m.nameOf(x.uid)}</b> <span>${x.text}</span><small>${timeAgo(x.clientAt)}</small></div>
         ${mine ? html`<button type="button" class="comment-del" data-action="deleteComment" data-id=${x.id} aria-label="Delete comment">${icon('x', { size: 14 })}</button>` : ''}
       </div>`;
@@ -239,7 +239,7 @@ function recapSheet(state, m, sheet) {
     <h2>${v.w.counted ? (v.w.bothHit ? 'You both crushed it! 🎉' : 'Week in review') : 'Warm-up week'}</h2>
     <div class="recap-rows">
       ${v.rows.map((x) => html`<div class="recap-row" data-who=${x.who}>
-        ${avatar(x.name, x.who, 'sm')}<b>${x.uid === m.meUid ? 'You' : x.name}</b>
+        ${avatar(x.name, x.who, 'sm', m.avatarOf(x.uid))}<b>${x.uid === m.meUid ? 'You' : x.name}</b>
         <span class=${cx('recap-score', x.hit ? 'ok' : 'bad')}>${x.count}/${x.goal} ${x.hit ? '✓' : '✗'}</span>
       </div>`)}
     </div>

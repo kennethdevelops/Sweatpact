@@ -175,6 +175,21 @@ test('pokes: only your own entry; partner sees it and marks it seen', async () =
   await assert.rejects(() => firestore.updateDoc(firestore.doc(firestore.getFirestore(app.getApp('phoneA')), 'pairs', pairId), { [`pokes.${uidB}`]: { text: 'fake', at: 1 } }), /permission/i);
 });
 
+test('profile pictures: only your own, size-limited, synced to the partner and kept on your profile', async () => {
+  const uidA = A.store.get().user.uid;
+  const uidB = B.store.get().user.uid;
+  await B.backend.setAvatar(TINY_JPEG);
+  const sa = await waitFor(A.store, (s) => s.pair.avatars?.[uidB] === TINY_JPEG, 'A sees B picture');
+  assert.equal(getModel(sa).avatarOf(uidB), TINY_JPEG);
+  await waitFor(B.store, (s) => s.profile?.avatar === TINY_JPEG, 'B profile keeps picture');
+  const dbB = firestore.getFirestore(app.getApp('phoneB'));
+  await assert.rejects(() => firestore.updateDoc(firestore.doc(dbB, 'pairs', pairId), { [`avatars.${uidA}`]: TINY_JPEG }), /permission/i);
+  await assert.rejects(() => firestore.updateDoc(firestore.doc(dbB, 'pairs', pairId), { [`avatars.${uidB}`]: 'x'.repeat(100001) }), /permission/i);
+  await B.backend.setAvatar(null);
+  await waitFor(A.store, (s) => !s.pair.avatars?.[uidB], 'A sees picture removed');
+  await B.backend.setAvatar(TINY_JPEG); // kept for the re-join test below
+});
+
 test('comments sync, are limited to 280 characters, and only your own can be deleted', async () => {
   const cid = B.store.get().checkins[0].id;
   const id = await A.backend.addComment(cid, 'Nice one! 🔥');
@@ -258,7 +273,8 @@ test('leave and re-join; remove partner', async () => {
   const sa = await waitFor(A.store, (s) => s.pair?.members?.length === 1, 'A alone');
   assert.equal(sa.pair.startWeek, null);
   await B.backend.joinPair(code, { name: 'Alex', goal: 2 });
-  await waitFor(A.store, (s) => s.pair?.members?.length === 2 && s.pair.startWeek, 'B back');
+  const back = await waitFor(A.store, (s) => s.pair?.members?.length === 2 && s.pair.startWeek, 'B back');
+  assert.equal(back.pair.avatars?.[B.store.get().user.uid], TINY_JPEG, 'picture comes along when joining');
   await A.backend.removePartner();
   const sb = await waitFor(B.store, (s) => s.notice === 'removed' && !s.pair, 'B removed');
   assert.equal(sb.profile.pairId, null);

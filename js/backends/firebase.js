@@ -2,10 +2,10 @@
 // (free Spark plan). The SDK is loaded from Google's CDN, so there is no build step.
 //
 // Data model (see firestore.rules):
-//   users/{uid}                     { name, pairId, body{} }
+//   users/{uid}                     { name, pairId, avatar, body{} }
 //   users/{uid}/weights/{dayKey}    { dayKey, clientAt, weightKg, muscleKg?, fatKg?, waterKg?, note? }  (private)
 //   codes/{CODE}                    { pairId, createdBy, creatorName, weekStartsOn }
-//   pairs/{pairId}                  { members[], names{}, goals{}, stakes[], weekStartsOn, startWeek, reward, rewardHistory[], paid{} }
+//   pairs/{pairId}                  { members[], names{}, avatars{}, goals{}, stakes[], weekStartsOn, startWeek, reward, rewardHistory[], paid{} }
 //   pairs/{pairId}/checkins/{id}    { uid, dayKey, clientAt, kind, status, activity, note, hasPhoto, dual, reactions{} }
 //   pairs/{pairId}/photos/{id}      { uid, main, inset }  (compressed JPEG data URLs, fetched on demand)
 
@@ -101,6 +101,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
   const uid = () => auth?.currentUser?.uid || null;
   const pairRef = () => fs.doc(db, 'pairs', currentPairId);
   const model = () => getModel(S());
+  const myAvatar = () => S().profile?.avatar || null;
 
   function markReady() {
     if (S().boot === 'ready') return;
@@ -245,7 +246,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
         profileLoaded = true;
         clearTimeout(profileTimer);
         const d = snap.exists() ? snap.data() : {};
-        store.set({ profile: { name: d.name || '', pairId: d.pairId || null }, body: d.body || null });
+        store.set({ profile: { name: d.name || '', pairId: d.pairId || null, avatar: d.avatar || null }, body: d.body || null });
         watchPair(d.pairId || null);
         markReady();
       },
@@ -391,6 +392,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
               createdAt: fs.serverTimestamp(),
               members: [me],
               names: { [me]: name },
+              ...(myAvatar() ? { avatars: { [me]: myAvatar() } } : {}),
               goals: { [me]: [{ from: wk, value: goal }] },
               stakes: stakes ? [{ from: wk, value: stakes }] : [],
               weekStartsOn,
@@ -436,6 +438,7 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
           members: fs.arrayUnion(me),
           [`names.${me}`]: name,
           [`goals.${me}`]: [{ from: wk, value: goal }],
+          ...(myAvatar() ? { [`avatars.${me}`]: myAvatar() } : {}),
         });
         await fs.setDoc(fs.doc(db, 'users', me), { name, pairId: info.pairId, updatedAt: fs.serverTimestamp() }, { merge: true });
       } catch (err) {
@@ -472,6 +475,15 @@ export function createFirebaseBackend({ store, config, sdk: injectedSdk = null, 
       batch.update(pairRef(), { [`names.${me}`]: name });
       batch.set(fs.doc(db, 'users', me), { name }, { merge: true });
       background(batch.commit(), 'setName');
+    },
+    // The picture lives on your profile (so it follows you to a new pact) and on the pact (so your partner sees it).
+    async setAvatar(dataUrl) {
+      const me = uid();
+      if (!me) throw new Error('You are not signed in.');
+      const batch = fs.writeBatch(db);
+      batch.set(fs.doc(db, 'users', me), { avatar: dataUrl || null }, { merge: true });
+      if (currentPairId && S().pair) batch.update(pairRef(), { [`avatars.${me}`]: dataUrl || fs.deleteField() });
+      background(batch.commit(), 'setAvatar');
     },
     async setGoal(goal) {
       const pair = requirePair();

@@ -114,6 +114,15 @@ export async function buildCheckinPhoto(mainUrl, insetUrl) {
   return { main, inset };
 }
 
+export const AVATAR_SIZE = 256;
+export const AVATAR_MAX_BYTES = 30_000;
+
+/** Profile picture: square center crop, small enough to live on the pact document. */
+export async function buildAvatar(file) {
+  const canvas = await fileToCanvas(file, { width: AVATAR_SIZE, height: AVATAR_SIZE });
+  return canvasToJpeg(canvas, { maxBytes: AVATAR_MAX_BYTES, quality: 0.82, minQuality: 0.4 });
+}
+
 // ---------- Demo placeholder "photos" (no real camera needed) ----------
 
 function mulberry32(seed) {

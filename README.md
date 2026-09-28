@@ -13,6 +13,7 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 | Feature | What it does |
 | --- | --- |
 | Weekly goal | Each person picks how many days a week they'll work out (1–7). |
+| Profile pictures | Settings → **Profile picture**: pick any photo, it's cropped square and shrunk to ~30 KB. It shows on the week board, posts, comments and stats. Without one you get your initial. |
 | Photo check-in | Snap a selfie, then optionally a second shot with the other camera. **Either one can be the main photo** (tap to swap), so you never have to film other people at the gym. Add the activity and a note. |
 | Shared week board | See both of your weeks at a glance: which days, photos, and who's safe. Updates live on your partner's phone. |
 | Stakes | “Loser buys dinner.” Whoever misses their weekly goal owes it. There's a ledger of who owes what, with a “settled” button. |
@@ -34,7 +35,7 @@ It's a **web app (PWA)**: it installs to the Home Screen on iPhone and Android a
 
 What's *not* possible in a web app: Home Screen **widgets**, and **push notifications** without running a server (see [Ideas for later](#ideas-for-later)).
 
-> **Updating from an older version?** Version 1.1 added pokes and comments and 1.2 added weight tracking. Both need the new rules: paste [`firestore.rules`](firestore.rules) into Firebase → Firestore Database → Rules → **Publish** again.
+> **Updating from an older version?** Version 1.1 added pokes and comments, 1.2 added weight tracking and 1.3 added profile pictures. Each needs the new rules: paste [`firestore.rules`](firestore.rules) into Firebase → Firestore Database → Rules → **Publish** again.
 
 ---
 
@@ -190,10 +191,10 @@ tests/                      `npm test` – logic tests + Firebase backend tests 
 ### Data model (Firestore)
 
 ```
-users/{uid}                    { name, pairId, body: { heightCm, sex, birthYear, goalKg, units, share } }
+users/{uid}                    { name, pairId, avatar, body: { heightCm, sex, birthYear, goalKg, units, share } }
 users/{uid}/weights/{dayKey}   { weightKg, muscleKg?, fatKg?, waterKg?, note? }   ← private, only you can read it
 codes/{CODE}                   { pairId, creatorName, ... }        ← how a partner finds the pact
-pairs/{pairId}                 { members, names, goals, stakes, weekStartsOn, startWeek, reward, rewardHistory, paid }
+pairs/{pairId}                 { members, names, avatars, goals, stakes, weekStartsOn, startWeek, reward, rewardHistory, paid }
 pairs/{pairId}/checkins/{id}   { uid, dayKey, kind, status, activity, note, reactions, ... }   (small)
 pairs/{pairId}/photos/{id}     { main, inset }                     (compressed JPEGs, fetched only when shown)
 pairs/{pairId}/comments/{id}   { checkinId, uid, text, clientAt }
