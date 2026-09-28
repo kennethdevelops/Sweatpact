@@ -76,15 +76,22 @@
 *::after {
   box-sizing: border-box;
 }
+/* The document itself never scrolls; <body> is the scroll container. On iOS
+   Safari a scrolling root makes the toolbar collapse/expand and rubber-band,
+   which drags position:fixed bars (the tab bar) around mid-scroll. */
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   background: var(--bg);
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 body {
   margin: 0;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
@@ -1823,10 +1830,10 @@ img {
 /* ---------- tab bar ---------- */
 .tabbar {
   position: fixed;
-  left: 50%;
+  left: 0;
+  right: 0;
   bottom: 0;
-  transform: translateX(-50%);
-  width: 100%;
+  margin: 0 auto;
   max-width: 520px;
   height: calc(var(--tabbar-h) + var(--safe-b));
   padding: 0 6px var(--safe-b);

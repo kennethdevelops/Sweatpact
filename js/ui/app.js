@@ -291,7 +291,7 @@ export function createApp({ root, store }) {
 
     const viewKey = view === 'onboarding' ? `ob-${state.ui.ob.step}` : view;
     if (viewKey !== lastView) {
-      window.scrollTo(0, 0);
+      document.body.scrollTo(0, 0);
       if (view === 'onboarding') root.querySelector('.ob [autofocus]')?.focus({ preventScroll: true });
     }
     const sheetKey = sheet ? `${state.ui.sheet.type}:${state.ui.sheet.id || ''}` : '';
